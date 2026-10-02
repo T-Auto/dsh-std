@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type SkillRegistry from '@deepseek-ai/dsh-skill'
 import type {
@@ -175,6 +175,13 @@ import {
   type WorkspaceWriteIntent,
 } from './binary-fs.js'
 
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Content a standard facet deferred into the request through one tool execution. */
+    'dsh-std': { kind: 'dsh-std'; component: string }
+  }
+}
+
 export const name = 'dsh-std-adapter'
 export const DSH_STD_NAMESPACE = 'dshStd'
 export const DSH_ACTIVATION_API_VERSION = FACET_MODULE_API_VERSION
@@ -196,6 +203,12 @@ export const DSH_SKILL_KIND = SKILL_KIND
 const ADAPTER_COMPONENT = 'std.dsh.adapter-dsh'
 const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
 const BROWSER_MODULE_ROUTE = '/dsh-std/browser-modules'
+/**
+ * Browser reference to the same route. A DSH document carries its own base, so
+ * a document-relative reference stays inside whatever mount served the page,
+ * while the registered route key above stays an absolute pathname.
+ */
+const BROWSER_MODULE_REFERENCE = BROWSER_MODULE_ROUTE.slice(1)
 
 interface BrowserModuleResponse {
   writeHead(status: number, headers?: Readonly<Record<string, string>>): void
@@ -450,7 +463,7 @@ async function standardToolContext(
       deferContent(content: readonly ToolContentBlock[]) {
         exec.deferContext(createUserMessage({
           content: dshContent(content),
-          source: { kind: 'plugin', plugin: owner },
+          source: { kind: 'dsh-std', component: owner },
         }))
       },
     }),
@@ -522,7 +535,20 @@ class DshToolOverrideRegistry {
     private readonly ctx: Context,
     private readonly sessionEvents: DshSessionEventRegistry,
   ) {
-    ctx.on('agent/created', ({ agent }) => { this.syncAgent(agent as DshAgentLike) })
+    ctx.on('agent/created', ({ agent }) => {
+      try {
+        this.syncAgent(agent as DshAgentLike)
+      } catch (error) {
+        // DeepSeek Harness dispatches `agent/created` serially and rejects the
+        // creation when a listener throws. A ToolOverride that cannot be
+        // installed must not prevent unrelated agents from being created.
+        this.ctx.logger('@dsh-std/adapter-dsh').warn(
+          `ToolOverride synchronization failed for agent ${JSON.stringify((agent as DshAgentLike).id)}: ${
+            error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      return undefined
+    })
     ctx.on('agent/disposed', ({ agent }) => { this.forgetAgent(agent as DshAgentLike) })
     ctx.on('tools/change', () => { this.syncAll() })
   }
@@ -709,13 +735,13 @@ class DshSessionEventRegistry {
 
 function toStandardBlock(block: ContentBlock): ModelContentBlock {
   if (block.type === 'image') return { type: 'image', reference: block.attachment }
-  // DSH 0.1.5 projects durable file references to deterministic text before
-  // calling a model adapter. Seeing one here means that Host contract drifted.
+  // DSH projects durable file references to deterministic text before calling a
+  // model adapter. Seeing one here means that Host contract drifted.
   if (block.type === 'file') throw new TypeError('DSH file block reached the model adapter before request projection')
-  if (block.type === 'tool-result') return {
-    type: 'tool-result', toolCallId: String(block.toolCallId),
-    content: block.content.map(toStandardBlock),
-    ...(block.isError === undefined ? {} : { isError: block.isError }),
+  // Tool availability changes are session-local; the standard request carries
+  // the active tool schemas instead of block-level tool updates.
+  if (block.type === 'tool-addition' || block.type === 'tool-removal') {
+    throw new TypeError(`DSH ${block.type} block reached the model adapter before request projection`)
   }
   if (block.type === 'tool-call') return {
     type: 'tool-call', id: String(block.id), name: block.name, arguments: block.arguments,
@@ -723,20 +749,45 @@ function toStandardBlock(block: ContentBlock): ModelContentBlock {
   return { type: block.type, text: block.text }
 }
 
-function toStandardMessage(message: Message): ModelMessage {
+/**
+ * Project one DSH request message into the standard model message set.
+ *
+ * DSH carries a tool result as its own `tool`-role message; the standard
+ * protocol has no tool role, so that result becomes a `tool-result` block in a
+ * user message, which is how provider transports carry it. Developer messages
+ * hold session-local tool availability changes that have no standard block, and
+ * the active schemas already travel with the request, so they contribute
+ * nothing to a standard request.
+ * @param message - one durable conversation message or request-only user input.
+ * @returns the standard message, or `undefined` when it has no standard form.
+ */
+function toStandardMessage(message: RequestMessage): ModelMessage | undefined {
+  if (message.role === 'developer') return undefined
+  const source = message.source === undefined
+    ? {}
+    : { source: structuredClone(message.source) as Readonly<Record<string, unknown>> }
+  if (message.role === 'tool') return {
+    role: 'user',
+    content: [{
+      type: 'tool-result', toolCallId: String(message.toolCallId),
+      content: message.content.map(toStandardBlock),
+      ...(message.isError === undefined ? {} : { isError: message.isError }),
+    }],
+    ...source,
+  }
   return {
     role: message.role,
     content: message.content.map(toStandardBlock),
-    source: structuredClone(message.source) as Readonly<Record<string, unknown>>,
+    ...source,
   }
 }
 
 function fromStandardBlock(block: ModelContentBlock): ContentBlock {
   if (block.type === 'image') return { type: 'image', attachment: block.reference as never }
-  if (block.type === 'tool-result') return {
-    type: 'tool-result', toolCallId: block.toolCallId as never,
-    content: block.content.map(fromStandardBlock),
-    ...(block.isError === undefined ? {} : { isError: block.isError }),
+  // A standard tool result answers a tool call; DSH models it as a tool-role
+  // message, so a model handler cannot return one as a stream block.
+  if (block.type === 'tool-result') {
+    throw new TypeError('a standard tool-result block cannot be produced by a model handler')
   }
   if (block.type === 'tool-call') return {
     type: 'tool-call', id: block.id as never, name: block.name, arguments: block.arguments,
@@ -785,7 +836,9 @@ class DshStandardModelAdapter extends LlmAdapter {
     const { signal: _signal, sessionId, ...base } = options
     const request = {
       ...base,
-      messages: options.messages.map(toStandardMessage),
+      messages: options.messages
+        .map(toStandardMessage)
+        .filter((message): message is ModelMessage => message !== undefined),
       ...(sessionId === undefined ? {} : { sessionId: String(sessionId) }),
     }
     for await (const chunk of this.handler.stream(request as never, {
@@ -1481,7 +1534,7 @@ export class DshStandardAdapter extends TypertRemoteService {
       path,
       manifest,
       facet,
-      url: `${BROWSER_MODULE_ROUTE}/${routeId}.js?rev=${rev}`,
+      url: `${BROWSER_MODULE_REFERENCE}/${routeId}.js?rev=${rev}`,
     })
     this.browserModules.set(moduleId, record)
     let active = true

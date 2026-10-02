@@ -16,7 +16,6 @@ interface FixtureSession {
     createdAt: number
     parentSession?: string
     isSeeded?: boolean
-    seedLength?: number
     origin?: 'subagent'
   }
   inheritedEventCount?: number
@@ -37,7 +36,11 @@ class FixtureController implements DshSessionControllerFace {
     blank?: boolean
     parentSessionId?: string
     origin?: 'subagent'
-    projections?: { asOfSeq: number; values: Readonly<Record<string, unknown>> }
+    projections?: {
+      kind?: 'cached' | 'sequenced'
+      asOfSeq: number
+      values: Readonly<Record<string, unknown>>
+    }
   }> }> {
     return {
       items: [...this.sessions.values()].map(session => ({
@@ -168,7 +171,7 @@ describe('DSH Session protocol adapter', () => {
     expect(controller.inspectCalls).toEqual([])
   })
 
-  it('keeps the previous DSH Session summary shape working through inspect fallback', async () => {
+  it('falls back to inspection when a summary carries no complete body-free descriptor', async () => {
     const { controller, catalog } = fixture()
     controller.sessions.set('session-a', {
       meta: { id: 'session-a', createdAt: 1_000 },
@@ -179,6 +182,30 @@ describe('DSH Session protocol adapter', () => {
       sessions: [{ session: { id: 'session-a' }, title: 'Legacy' }],
     })
     expect(controller.inspectCalls).toEqual(['session-a'])
+  })
+
+  it.each([
+    { kind: 'sequenced' as const, revision: 8, inspectCalls: [] as string[] },
+    { kind: 'cached' as const, revision: 1, inspectCalls: ['session-a'] },
+  ])('publishes a projection watermark as a revision only in a comparable sequence space ($kind)', async ({
+    kind, revision, inspectCalls,
+  }) => {
+    const { controller, catalog } = fixture()
+    controller.sessions.set('session-a', {
+      meta: { id: 'session-a', createdAt: 1_000 },
+      events: [{ type: 'session/title', seq: 0, time: 1_100, data: { title: 'Alpha' } }],
+    })
+    vi.spyOn(controller, 'list').mockResolvedValueOnce({
+      items: [{
+        sessionId: 'session-a',
+        updatedAt: 1_100,
+        projections: { kind, asOfSeq: 7, values: { title: 'Alpha' } },
+      }],
+    })
+    await expect(catalog.handle('list', {}, context())).resolves.toMatchObject({
+      sessions: [{ session: { id: 'session-a' }, title: 'Alpha', revision }],
+    })
+    expect(controller.inspectCalls).toEqual(inspectCalls)
   })
 
   it('maps create request ids idempotently and avoids duplicate title events', async () => {
@@ -353,7 +380,7 @@ describe('DSH Session protocol adapter', () => {
     expect(controller.renameCalls).toHaveLength(before)
   })
 
-  it('reads the exact inherited prefix from the 0.1.5 inspection shape', async () => {
+  it('reads the exact inherited prefix from the inspection shape', async () => {
     const { controller, catalog } = fixture()
     controller.sessions.set('forked', {
       meta: { id: 'forked', createdAt: 2_000, parentSession: 'parent', isSeeded: true },

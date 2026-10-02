@@ -36,12 +36,16 @@ interface DshSessionHeader {
   readonly createdAt: number
   readonly parentSession?: string
   readonly isSeeded?: boolean
-  /** Compatibility with the pre-0.1.5 Session header. */
-  readonly seedLength?: number
   readonly origin?: 'subagent'
 }
 
 interface DshSessionProjectionHints {
+  /**
+   * DSH 0.1.5 publishes only sequenced projection watermarks; DSH 0.2.0 tags
+   * each watermark with the sequence space it belongs to. A `cached` watermark
+   * must not be compared with the connected Session's own values.
+   */
+  readonly kind?: 'cached' | 'sequenced'
   readonly asOfSeq: number
   readonly values: Readonly<Record<string, unknown>>
 }
@@ -72,7 +76,7 @@ interface DshSessionFollowEvent {
   readonly event: DshSessionEvent
 }
 
-/** Structural face shared by supported DSH 0.1.2 and 0.1.5 Session Controllers. */
+/** Structural face shared by the supported DSH 0.1.5 and 0.2.0 Session Controllers. */
 export interface DshSessionControllerFace {
   list(request: { readonly cursor?: string }, signal: AbortSignal): Promise<{
     readonly items: readonly DshSessionSummary[]
@@ -209,7 +213,7 @@ export class DshSessionProtocolAdapter {
       return descriptorOf(this.participantId, inspected)
     } catch (error) {
       const code = failureCode(error)
-      if (code === 'session/not-found' || code === 'session-not-found') return undefined
+      if (code === 'session/not-found') return undefined
       throw error
     }
   }
@@ -355,7 +359,7 @@ function descriptorOf(
   inspection: DshSessionInspection,
 ): SessionDescriptor {
   const { meta: header, events } = inspection
-  const inheritedEventCount = inspection.inheritedEventCount ?? header.seedLength
+  const inheritedEventCount = inspection.inheritedEventCount
   const titleEvent = [...events].reverse().find(event => event.type === 'session/title'
     && typeof record(event.data)?.title === 'string')
   const title = record(titleEvent?.data)?.title
@@ -378,16 +382,22 @@ function descriptorOf(
   })
 }
 
+/** A body-free summary whose projection watermark is a comparable revision. */
+type DshBodyFreeSummary = DshSessionSummary & {
+  readonly updatedAt: number
+  readonly projections: DshSessionProjectionHints
+}
+
 function descriptorOfSummary(
   participantId: string,
-  summary: DshSessionSummary & { readonly updatedAt: number },
+  summary: DshBodyFreeSummary,
 ): SessionDescriptor {
-  const title = summary.projections?.values.title
+  const title = summary.projections.values.title
   return Object.freeze({
     session: Object.freeze({ provider: participantId, id: summary.sessionId }),
     ...(typeof title === 'string' && title.trim() !== '' ? { title } : {}),
     state: 'available',
-    revision: Math.max(0, (summary.projections?.asOfSeq ?? -1) + 1),
+    revision: Math.max(0, summary.projections.asOfSeq + 1),
     updatedAt: new Date(summary.updatedAt).toISOString(),
     ...(summary.parentSessionId === undefined ? {} : {
       lineage: Object.freeze({
@@ -397,8 +407,23 @@ function descriptorOfSummary(
   })
 }
 
-function hasBodyFreeDescriptor(summary: DshSessionSummary): summary is DshSessionSummary & { readonly updatedAt: number } {
-  return Number.isFinite(summary.updatedAt)
+/**
+ * A Catalog list may describe a Session without reading its event log only when
+ * its summary carries a revision the Session's own event sequence can be
+ * compared with. DSH 0.2.0 tags each projection watermark with its sequence
+ * space, and a `cached` watermark describes another space; publishing one as a
+ * Session revision would report a boundary the Session never reached, so those
+ * rows fall back to an inspection.
+ */
+function hasBodyFreeDescriptor(summary: DshSessionSummary): summary is DshBodyFreeSummary {
+  return Number.isFinite(summary.updatedAt) && comparableSequence(summary) !== undefined
+}
+
+function comparableSequence(summary: DshSessionSummary): number | undefined {
+  const projections = summary.projections
+  if (projections === undefined) return undefined
+  if (!Number.isSafeInteger(projections.asOfSeq) || projections.asOfSeq < 0) return undefined
+  return projections.kind === undefined || projections.kind === 'sequenced' ? projections.asOfSeq : undefined
 }
 
 function eventEnvelope(

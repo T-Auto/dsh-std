@@ -1,6 +1,7 @@
 /** Strict Host-side Typert definition for the adapter's browser command bridge. */
 
 import { z } from 'zod'
+import { strictCodec } from './strict-codec.js'
 
 const stringSchema = z.string()
 const commandResultSchema = z.union([
@@ -44,26 +45,14 @@ const commandInvocation = Object.freeze({
   parameters: Object.freeze([
     Object.freeze({
       name: 'sessionId', wire: 'sessionId', source: 'json' as const,
-      codec: Object.freeze({
-        mode: 'strict' as const,
-        typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:sessionId',
-        schema: stringSchema,
-      }),
+      codec: strictCodec('@dsh-std/adapter-dsh#dshStd/command:sessionId', stringSchema),
     }),
     Object.freeze({
       name: 'line', wire: 'line', source: 'json' as const,
-      codec: Object.freeze({
-        mode: 'strict' as const,
-        typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:line',
-        schema: stringSchema,
-      }),
+      codec: strictCodec('@dsh-std/adapter-dsh#dshStd/command:line', stringSchema),
     }),
   ]),
-  result: Object.freeze({
-    mode: 'strict' as const,
-    typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:result',
-    schema: commandResultSchema,
-  }),
+  result: strictCodec('@dsh-std/adapter-dsh#dshStd/command:result', commandResultSchema),
 })
 
 const browserFacetsInvocation = Object.freeze({
@@ -73,11 +62,7 @@ const browserFacetsInvocation = Object.freeze({
   method: 'browserFacets',
   invocation: Object.freeze({ kind: 'direct' as const }),
   parameters: Object.freeze([]),
-  result: Object.freeze({
-    mode: 'strict' as const,
-    typeSymbol: '@dsh-std/adapter-dsh#dshStd/browserFacets:result',
-    schema: browserFacetCatalogSchema,
-  }),
+  result: strictCodec('@dsh-std/adapter-dsh#dshStd/browserFacets:result', browserFacetCatalogSchema),
 })
 
 const componentsInvocation = Object.freeze({
@@ -87,11 +72,7 @@ const componentsInvocation = Object.freeze({
   method: 'components',
   invocation: Object.freeze({ kind: 'direct' as const }),
   parameters: Object.freeze([]),
-  result: Object.freeze({
-    mode: 'strict' as const,
-    typeSymbol: '@dsh-std/adapter-dsh#dshStd/components:result',
-    schema: standardComponentCatalogSchema,
-  }),
+  result: strictCodec('@dsh-std/adapter-dsh#dshStd/components:result', standardComponentCatalogSchema),
 })
 
 /** Typert Loader artifact discovered from package.json exports["./typert"]. */

@@ -164,7 +164,7 @@ async function fixture(
     list: async () => ({ items: [{ sessionId: 'session-1' }] }),
     inspect: async (id: string) => {
       if (id !== 'session-1') {
-        throw Object.assign(new Error('not found'), { failure: { code: 'session-not-found' } })
+        throw Object.assign(new Error('not found'), { failure: { code: 'session/not-found' } })
       }
       return {
         meta: { id: 'session-1', createdAt: 1 },
@@ -408,9 +408,10 @@ describe('@dsh-std/adapter-dsh', () => {
       facets: [expect.objectContaining({ name: 'host', state: 'active' })],
     })]))
     await vi.waitFor(() => { expect(routes).toHaveLength(1) })
+    expect(facets[0]!.url).toMatch(/^dsh-std\/browser-modules\/[a-f0-9]{24}\.js\?rev=[a-f0-9]{16}$/u)
     let status = 0
     let body: Uint8Array | string | undefined
-    routes[0]!.handler({ method: 'GET', url: facets[0]!.url }, {
+    routes[0]!.handler({ method: 'GET', url: new URL(facets[0]!.url, 'http://dsh.invalid/').pathname }, {
       writeHead(value) { status = value },
       end(value) { body = value },
     })
@@ -533,9 +534,8 @@ describe('@dsh-std/adapter-dsh', () => {
     expect(issuedCapability?.binding(notificationSupport)).toBeUndefined()
   })
 
-  it('discovers from the profile directory URL supplied by the DSH bundle', async () => {
-    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-profile-url-'))
-    temporaryRoots.push(profileDir)
+  /** Write one profile dependency whose host facet publishes a fixture ModelProvider. */
+  function writeProfileModelComponent(profileDir: string): void {
     const componentDir = join(profileDir, 'node_modules', 'fixture-component')
     mkdirSync(componentDir, { recursive: true })
     writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
@@ -574,12 +574,24 @@ export default {
       'fixture-models',
       {
         async listModels() { return [{ id: 'fixture-model', name: 'Fixture Model' }] },
-        async *stream() {},
+        async *stream(request) {
+          globalThis.__dshStdFixtureModelRequest = request
+          if (globalThis.__dshStdFixtureEchoToolResult === true) {
+            globalThis.__dshStdFixtureEchoToolResult = false
+            yield { type: 'block-end', index: 0, block: { type: 'tool-result', toolCallId: 'call-1', content: [] } }
+          }
+        },
       },
     )
   },
 }
 `)
+  }
+
+  it('discovers from the profile directory URL supplied by the DSH bundle', async () => {
+    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-profile-url-'))
+    temporaryRoots.push(profileDir)
+    writeProfileModelComponent(profileDir)
 
     const ctx = new Context()
     // Cordis scopes the plugin context to its package. The bundle evaluates
@@ -588,7 +600,7 @@ export default {
     ctx.provide('agents', { get: () => undefined, list: () => [] } as never)
     ctx.provide('sessionController', {
       list: async () => ({ items: [] }),
-      inspect: async () => { throw Object.assign(new Error('not found'), { failure: { code: 'session-not-found' } }) },
+      inspect: async () => { throw Object.assign(new Error('not found'), { failure: { code: 'session/not-found' } }) },
       create: async ({ sessionId }: { sessionId?: string }) => ({ sessionId: sessionId ?? 'created' }),
       rename: async ({ title }: { title: string }) => ({ title, seq: 0 }),
       follow: async function *() { yield { type: 'snapshot' as const, cursor: -1 } },
@@ -608,6 +620,85 @@ export default {
     expect(ctx.llm.listProviders()).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'fixture-models' }),
     ]))
+    await ctx.fiber.dispose()
+  })
+
+  it('projects tool and developer messages into the standard model request', async () => {
+    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-model-projection-'))
+    temporaryRoots.push(profileDir)
+    writeProfileModelComponent(profileDir)
+
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(`${join(profileDir, 'node_modules', '@dsh-std', 'adapter-dsh')}/`).href
+    ctx.provide('agents', { get: () => undefined, list: () => [] } as never)
+    ctx.provide('sessionController', {
+      list: async () => ({ items: [] }),
+      inspect: async () => { throw Object.assign(new Error('not found'), { failure: { code: 'session/not-found' } }) },
+      create: async ({ sessionId }: { sessionId?: string }) => ({ sessionId: sessionId ?? 'created' }),
+      rename: async ({ title }: { title: string }) => ({ title, seq: 0 }),
+      follow: async function *() { yield { type: 'snapshot' as const, cursor: -1 } },
+    } as never)
+    await ctx.plugin(CommandRuntime)
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(dshStandardAdapterPlugin, { profileBaseUrl: pathToFileURL(`${profileDir}/`).href })
+    const adapter = ctx.dshStd
+    for (let attempt = 0; attempt < 20 && (await adapter.snapshot()).facets.length === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    const request = {
+      provider: 'fixture-models',
+      model: 'fixture-model',
+      messages: [
+        {
+          role: 'assistant', id: 'message-1', source: { kind: 'model', provider: 'fixture', model: 'fixture-model' },
+          content: [{ type: 'tool-call', id: 'call-1', name: 'read', arguments: '{}' }],
+        },
+        {
+          role: 'tool', id: 'message-2', source: { kind: 'tool', callId: 'call-1' },
+          toolCallId: 'call-1', isError: true, content: [{ type: 'text', text: 'file body' }],
+        },
+        {
+          role: 'developer', id: 'message-3', source: { kind: 'tool-registry' },
+          content: [{ type: 'tool-addition', toolName: 'read' }],
+        },
+      ],
+    } as never
+    for await (const _chunk of ctx.llm.stream(request)) { /* drain */ }
+
+    // DSH carries a tool result as its own tool-role message while the standard
+    // request has no tool role, and session-local tool changes stay out.
+    expect((globalThis as { __dshStdFixtureModelRequest?: { messages: unknown[] } })
+      .__dshStdFixtureModelRequest?.messages).toEqual([
+      {
+        role: 'assistant',
+        source: { kind: 'model', provider: 'fixture', model: 'fixture-model' },
+        content: [{ type: 'tool-call', id: 'call-1', name: 'read', arguments: '{}' }],
+      },
+      {
+        role: 'user',
+        source: { kind: 'tool', callId: 'call-1' },
+        content: [{ type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'file body' }], isError: true }],
+      },
+    ])
+
+    // A handler cannot answer a tool call with a stream block: DSH carries the
+    // result in a tool-role message, so the request fails as a model error.
+    ;(globalThis as { __dshStdFixtureEchoToolResult?: boolean }).__dshStdFixtureEchoToolResult = true
+    const chunks: Array<{ readonly type: string; readonly reason?: unknown }> = []
+    for await (const chunk of ctx.llm.stream({
+      provider: 'fixture-models', model: 'fixture-model', messages: [],
+    } as never)) chunks.push(chunk as { readonly type: string })
+    expect(chunks).toEqual([
+      expect.objectContaining({
+        type: 'finish',
+        reason: {
+          kind: 'error',
+          failure: expect.objectContaining({
+            message: 'a standard tool-result block cannot be produced by a model handler',
+          }),
+        },
+      }),
+    ])
     await ctx.fiber.dispose()
   })
 
