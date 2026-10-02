@@ -169,6 +169,10 @@ Tool adapter 以 DSH 当前 ToolRuntime 为权威来源，manifest extension 只
 
 Model adapter 将 `ModelProviderHandler` 映射到 DSH 的 LLM registry。它把 DSH message、tool schema 和 attachment reference 转换为 model 标准类型，并将标准 stream chunk 转回 DSH stream；凭据始终由 provider handler 自己持有，不进入 adapter 或 connection catalog。没有可执行 handler 的 resource 只参与目录投影。
 
+DSH `0.2.0` 起，工具结果作为独立的 `tool` role message 存在，而标准 model protocol 只定义 system、user 与 assistant 三种 role 及 `tool-result` block。Model adapter 必须把 DSH tool-role message 投影为携带 `tool-result` block 的 user message，并保留同一 tool call id 的关联；不得把工具结果并入 assistant 内容，也不得丢弃。DSH `developer` message 只承载会话局部的工具增减，标准请求以 active tool schema 表达工具集合，因此该 message 不得进入标准请求。Tool-change block 出现在 developer message 之外属于宿主契约漂移，adapter 必须拒绝而不是静默降级。
+
+反方向上，标准 handler 只产生 text、reasoning、image 与 tool-call block；`tool-result` 只能由 host loop 依据工具执行产生。Adapter 必须拒绝 handler 在 stream 中返回 `tool-result` block，而不是把它投影成产品消息。
+
 ### Skill mapping
 
 Skill mapping 将 active facet 中的 `skills.dsh/v1alpha1` `Skill` resources 汇入 DSH 原生 Skill provider registry。该映射是 adapter bundle 的内建模块；安装 `@dsh-std/adapter-dsh` 已包含它，不要求用户再安装 bridge package。模块边界只用于隔离产品映射代码，不改变 npm 安装面。
@@ -179,15 +183,15 @@ DSH 的 provider rank、cache key、source bucket 与 scope layer 是产品实�
 
 ### Session mapping
 
-Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。面向 DeepSeek Harness `0.1.5-rc.2` 时，Catalog list 使用 Session Controller 的 body-free summaries 与已验证 projections，不为每个列表项读取完整 event log；Get/History 才按明确 SessionReference inspect。History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset，也不请求只供产品 Web 呈现的 cursorless assistant stream。
+Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。面向 DeepSeek Harness `0.1.5-rc.2` 与 `0.2.0-rc.2` 时，Catalog list 使用 Session Controller 的 body-free summaries 与已验证 projections，不为每个列表项读取完整 event log；Get/History 才按明确 SessionReference inspect。History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset，也不请求只供产品 Web 呈现的 cursorless assistant stream。
 
-为保持上一适配线兼容，缺少 `updatedAt` 等新版 summary 字段的 DSH `0.1.2` Controller 继续使用逐项 inspect；Adapter 不得把旧 summary 当作 malformed 0.1.5 数据，也不得在 0.1.5 已提供完整 body-free summary 时退化为全历史读取。
+DSH `0.2.0` 为 projection watermark 增加 sequence space 标记。只有与 Session 自身 event 序列可比较的 watermark 才能作为标准 revision 发布；标记为 cached 的 watermark 描述另一个序列空间，Adapter 不得把它的 `asOfSeq` 当作 Session revision，此类 summary 必须退化为逐项 inspect。缺少可比较 watermark 的 summary 同样不构成 body-free 描述依据，Adapter 不得据其发布 body-free 列表项。
 
 DSH 提供的 create、rename、delete 或 fork 操作只有在其公开领域 API 可以保持对应原子性与 lifecycle 语义时才进入 support spec。缺少某项产品操作不会阻止 adapter 发布只读 Catalog/History；adapter 不能绕过 Session invariant 伪造该 operation。
 
 SessionCatalog create 的重试必须遵守 Session 协议的请求幂等规则。Receipt 与确定性 Session id 必须至少按 consumer endpoint instance、participant identity 与 requestId 隔离；connection id 与 plan revision 变化不改变同一 client scope，另一个 endpoint instance 或 participant 使用相同 requestId 不得命中该 receipt。已完成请求的重试不得重新执行标题初始化，也不得覆盖后续显式改名。原生操作提交后发生响应失败时，adapter 应检查已提交状态，避免恢复过程重复修改已有标题。
 
-DSH `0.1.5` 的 fork lineage cut 来自 inspection 顶层 `inheritedEventCount`，不是旧 header 的 `seedLength`。Adapter 在 Get/History 路径使用该值产生标准 `lineage.through`；body-free Catalog list 可以只报告 parent 而省略无法从 summary 证明的 through cursor。
+DSH 的 fork lineage cut 来自 inspection 顶层 `inheritedEventCount`，Session header 不提供第二份 cut 来源。Adapter 在 Get/History 路径使用该值产生标准 `lineage.through`；body-free Catalog list 可以只报告 parent 而省略无法从 summary 证明的 through cursor。
 
 > **注解（草案口径）**：跨重启持久化请求记录（重放原始结果、检测原始输入冲突）与请求记录的内存有界性，仍属草案口径，尚未定为协议契约。当前实现仅在 adapter 实例生命周期内保证 `requestId` 幂等；待出现真实消费需求后，再以专门、带证据的 proposal 约束。
 
@@ -202,6 +206,8 @@ Agent adapter 以 DSH Agent registry 和 Agent handle 为活动实体权威来�
 Agent 关联的 DSH Session 与 cwd 分别转换为 SessionReference 和 WorkspaceReference。转换失败时省略相应可选关联或拒绝要求该关联的操作，不能把裸 session id、cwd 或 Agent object 填入标准 reference。
 
 AgentConfiguration descriptor 从当前 Agent runtime 实际支持的配置生成。Model、effort、preset、sandbox 等产品字段只有在具备标准 key 语义或明确的实现 namespace 时才公开；adapter 不把所有配置对象原样透传。
+
+DSH `0.2.0` 的 `agent/created` 以 serial 模式派发，listener 抛错会直接使 Agent 创建失败。Adapter 的 Agent 生命周期 listener 必须自行容纳映射失败并记录诊断，不得让某个 ToolOverride 的安装失败阻止无关 Agent 被创建；显式注册路径仍必须在失败时回滚映射并向外报告错误。
 
 ### Workspace mapping
 
@@ -238,6 +244,8 @@ DSH profile 选择 client、terminal 或其他 UI facet，并装入相应 shell 
 
 标准 Manifest 声明的 browser local module 由 adapter 投影到 DSH client module transport，并作为独立 Cordis fiber 激活；component 不需要为此提供 Host 侧 Loader entry 或 `dsh.client` metadata。一个被选择的 client facet 可以在同一 activation instance 中向多个 DSH shell registry 注册 UI。Adapter 为每项注册保存 owner 与 disposer，并在 facet deactivate、activation rollback 或 profile composition 替换时按 lifecycle 撤销。插件内部的组件、表单字段、样式和 locale 不逐项投影为标准 contribution。
 
+Adapter 以绝对 path 向 DSH `webServer` 注册承载这些模块产物的路由，而发给浏览器 document 的引用必须是 document-relative：DSH shell 在 document 中声明自己的 base，且挂载部署会把 shell 置于前缀之下，根绝对引用会指到挂载之外。Adapter 必须把路由键与浏览器引用作为两个常量分别维护，并保证引用在任何挂载下都落在同一路由上；不得把 `location.href` 当作解析基底。
+
 DSH 的 Cordis Loader inventory 与标准 component inventory 是不同的状态域。Adapter 不为标准 component 合成虚假的 Host Loader entry；产品 UI 若同时展示两者，必须保留各自 identity、lifecycle state 与来源。
 
 DSH 的 settings section、tool result view、sidebar entry、terminal scene 等具体接缝只有在各自 surface definition 存在时才映射为 `@dsh-std/ui` surface。其 slot 名、renderer ABI、cardinality 与内容 schema 属于 DSH 生态协议或 adapter mapping，不进入基础 UI envelope。声明一个 UI facet 也不表示它取得所有 DSH UI registry 的访问权。
@@ -266,6 +274,19 @@ Carrier-specific metadata 不进入 command/tool/model 等领域 API。
 标准插件依赖的是 adapter 提供的协议 API，不依赖 hook 目标。DSH 获得正式扩展点后可以替换内部映射，而不改变标准协议。
 
 Hook 只能位于 adapter 的产品映射或一次 bootstrap 边界。某个 component 若需要 adapter 尚未提供的 DSH 能力，应增加领域协议或 DSH 专属 extension/activation contract；不能在自身 activation 中重新 patch 同一个产品目标。
+
+### DeepSeek Harness 版本线
+
+Adapter 的 `peerDependencies` 声明列出它实际验证过的 DSH 版本线，当前为 `0.1.5-rc.2` 与 `0.2.0-rc.2` 两条。DSH `0.1.7` 起的插件兼容门禁按宿主自身版本校验插件 peer 范围，范围不覆盖宿主的插件会被拒绝激活。因此新增版本线时，adapter 必须同时扩展 peer 范围并完成该线的适配与验证；只放宽范围而不适配不符合本提案。
+
+同一 artifact 必须能在所有声明的版本线上加载并保持相同的可观察语义：
+
+- Typert strict codec 必须同时提供 `0.1.5` 线校验的 `schema` 与 `0.2.0` 线要求的 `create()` factory，两者必须指向同一份校验语义，并保持 schema 实例不可变；
+- Session summary 必须按 projection watermark 的 sequence space 决定它是否可以发布为 revision（见 Session mapping）；
+- Agent 生命周期 listener 必须在两条线上保持一致的失败语义：映射失败不得升级为宿主 Agent 创建失败；
+- 某个版本线需要不同的领域映射时，adapter 必须按该线的可观察契约分支，不得把其中一条线的行为当作另一条线的语义。
+
+移除一条版本线属于适配面的破坏性变更：adapter 必须同时移除只服务于该线的兼容路径，并在 CHANGELOG 中记录。
 
 ## Security considerations
 
