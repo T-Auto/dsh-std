@@ -2,7 +2,7 @@
   "name": "@dsh-std/connection",
   "version": "0.1.1-rc.3",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/connection" },
+  "repository": { "type": "git", "url": "git+https://github.com/T-Auto/dsh-std.git", "directory": "packages/connection" },
   "publishConfig": { "access": "public" },
   "type": "module",
   "main": "lib/index.js",

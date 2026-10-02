@@ -2,7 +2,7 @@
   "name": "@dsh-std/adapter-dsh",
   "version": "0.1.1-rc.4",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/adapter-dsh" },
+  "repository": { "type": "git", "url": "git+https://github.com/T-Auto/dsh-std.git", "directory": "packages/adapter-dsh" },
   "publishConfig": { "access": "public" },
   "type": "module",
   "main": "lib/index.js",

@@ -26,7 +26,8 @@ permissions:
 jobs:
   release:
     name: Publish version increases
-    if: github.repository == 'Yan-Zero/dsh-std'
+    # The repository ID survives ownership transfers; forks have different IDs.
+    if: github.repository_id == '1336081431'
     runs-on: ubuntu-latest
 
     steps:
@@ -127,6 +128,7 @@ jobs:
         env:
           ARTIFACTS_FILE: ${{ runner.temp }}/release-artifacts.tsv
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_SHA: ${{ steps.plan.outputs.release_sha }}
         shell: bash
         run: |

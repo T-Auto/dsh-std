@@ -86,6 +86,10 @@ pnpm check
 
 Published package versions are maintained directly in each `packages/*/package.json`; the release workflow does not rewrite them. A push to `main` compares those versions with the pre-push commit, then packs, OIDC-publishes, tags, and creates a GitHub Release for every increase. Prerelease versions use their prerelease identifier as the npm dist-tag (`rc`, `alpha`, or `beta`); stable versions use `latest`.
 
+The release job is restricted to this repository's GitHub ID, so ownership transfers do not disable it and forks do not publish packages. GitHub Releases target the repository running the workflow through `GH_REPO`.
+
+For the transfer to `T-Auto/dsh-std`, each published npm package's trusted publisher must use owner `T-Auto`, repository `dsh-std`, and workflow `release.yml` (with no environment). Configure this in the package's npm settings before publishing from the transferred repository; GitHub ownership transfer does not update the npm configuration. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+
 ## License
 
 [MIT](LICENSE)
