@@ -86,6 +86,10 @@ pnpm check
 
 发布版本直接维护在各个 `packages/*/package.json` 中，release workflow 不自动改写版本号。代码 push 到 `main` 后，workflow 将这些版本与 push 前的 commit 比较，对每个确实升高的版本依次打包、通过 OIDC 发布、创建 tag 和 GitHub Release。预发布版本以其预发布标识作为 npm dist-tag（`rc`、`alpha` 或 `beta`），稳定版本使用 `latest`。
 
+发布 job 通过 GitHub 仓库 ID 限定在本仓库运行，因此转移所有权不会使其失效，fork 也不会发布包。GitHub Release 通过 `GH_REPO` 指向运行 workflow 的当前仓库。
+
+转移到 `T-Auto/dsh-std` 时，每个已发布 npm 包的 trusted publisher 都需要配置为 Owner `T-Auto`、Repository `dsh-std`、Workflow `release.yml`（不设置 Environment）。从转移后的仓库发布之前，需要在各包的 npm 设置中完成配置；GitHub 仓库转移不会更新 npm 配置。参见 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)。
+
 ## 许可证
 
 [MIT](LICENSE)
