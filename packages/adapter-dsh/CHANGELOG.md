@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1-rc.4
+
+- Adapted the Host and browser integration to DeepSeek Harness `0.2.0-rc.2`. Peer ranges declare the `0.1.5-rc.2` and `0.2.0-rc.2` lines, the `0.1.2` line is no longer declared, and development pins follow `0.2.0-rc.2`.
+- Published strict Typert codecs that carry both the `0.1.5` line's `schema` and the `0.1.7`+ line's `create()` factory, so one artifact loads on every supported line.
+- Projected DSH `tool`-role messages into standard `tool-result` blocks on a user message and kept session-local `developer` messages out of the standard request, matching the DSH message model. A model handler that returns a `tool-result` block is rejected instead of producing a product message.
+- Declared the adapter's own message source kind for deferred tool content, replacing the removed shared `plugin` source kind.
+- Contained ToolOverride synchronization failures inside the serial `agent/created` dispatch, so a broken override no longer aborts agent creation, and reported the failure through the Cordis logger.
+- Published a document-relative browser module reference while the registered route key stays absolute, so plugin modules load under a mounted deployment as well as at the origin root.
+- Stopped publishing an incomparable `cached` Session projection watermark as a Session revision; those summaries fall back to inspection.
+- Removed the `0.1.2` Session compatibility paths: the legacy `seedLength` lineage cut and the pre-namespace not-found code.
+
 ## 0.1.1-rc.3
 
 - Added the built-in DSH Skill provider projection for `skills.dsh/v1alpha1` resources, with package-contained lazy body reads and activation-owned catalog invalidation.
