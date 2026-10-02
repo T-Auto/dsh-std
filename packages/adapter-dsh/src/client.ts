@@ -56,6 +56,7 @@ import {
   type BrowserUiViewBinding,
 } from '@dsh-std/ui-browser'
 import { ADAPTER_VERSION } from './version.js'
+import { strictCodec } from './strict-codec.js'
 
 export const BROWSER_UI_API_VERSION = BROWSER_UI_PROTOCOL_VERSION
 export const BROWSER_SETTINGS_SECTION_KIND = SETTINGS_SECTION.kind
@@ -176,11 +177,10 @@ const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
         remoteStringParameter('sessionId'),
         remoteStringParameter('line'),
       ]),
-      result: Object.freeze({
-        mode: 'strict' as const,
-        typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:result',
-        schema: Object.freeze({ parse: parseBrowserCommandExecution }),
-      }),
+      result: strictCodec(
+        '@dsh-std/adapter-dsh#dshStd/command:result',
+        Object.freeze({ parse: parseBrowserCommandExecution }),
+      ),
     }),
     Object.freeze({
       id: '@dsh-std/adapter-dsh#dshStd/browserFacets',
@@ -189,11 +189,10 @@ const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
       method: 'browserFacets',
       invocation: Object.freeze({ kind: 'direct' as const }),
       parameters: Object.freeze([]),
-      result: Object.freeze({
-        mode: 'strict' as const,
-        typeSymbol: '@dsh-std/adapter-dsh#dshStd/browserFacets:result',
-        schema: Object.freeze({ parse: parseBrowserFacetCatalog }),
-      }),
+      result: strictCodec(
+        '@dsh-std/adapter-dsh#dshStd/browserFacets:result',
+        Object.freeze({ parse: parseBrowserFacetCatalog }),
+      ),
     }),
     Object.freeze({
       id: '@dsh-std/adapter-dsh#dshStd/components',
@@ -202,11 +201,10 @@ const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
       method: 'components',
       invocation: Object.freeze({ kind: 'direct' as const }),
       parameters: Object.freeze([]),
-      result: Object.freeze({
-        mode: 'strict' as const,
-        typeSymbol: '@dsh-std/adapter-dsh#dshStd/components:result',
-        schema: Object.freeze({ parse: parseStandardComponentCatalog }),
-      }),
+      result: strictCodec(
+        '@dsh-std/adapter-dsh#dshStd/components:result',
+        Object.freeze({ parse: parseStandardComponentCatalog }),
+      ),
     }),
   ]),
 })
@@ -510,7 +508,7 @@ function parseBrowserFacetDescriptor(value: unknown, label = 'browser facet desc
   const descriptor = record(value, label)
   nonEmpty(descriptor.moduleId, `${label}.moduleId`)
   nonEmpty(descriptor.url, `${label}.url`)
-  if (!descriptor.url.startsWith('/')) throw new TypeError(`${label}.url must be same-origin relative`)
+  sameOriginReference(descriptor.url, `${label}.url`)
   nonEmpty(descriptor.facet, `${label}.facet`)
   const manifest = defineComponentManifest(descriptor.manifest as never)
   return Object.freeze({
@@ -519,6 +517,20 @@ function parseBrowserFacetDescriptor(value: unknown, label = 'browser facet desc
     manifest,
     facet: descriptor.facet,
   })
+}
+
+/**
+ * A browser module reference must stay inside the serving origin. A DSH
+ * document carries its own base, and a mounted deployment serves the shell
+ * under a prefix, so the adapter emits a document-relative reference that the
+ * document resolves under whatever mount served it. Root-absolute references
+ * from another producer remain acceptable; scheme-bearing and protocol-relative
+ * references do not.
+ */
+function sameOriginReference(value: string, label: string): void {
+  if (value.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/u.test(value)) {
+    throw new TypeError(`${label} must be a same-origin reference`)
+  }
 }
 
 function parseStandardComponentCatalog(value: unknown): readonly StandardComponentDescriptor[] {
@@ -722,16 +734,12 @@ function remoteStringParameter(name: string) {
     name,
     wire: name,
     source: 'json' as const,
-    codec: Object.freeze({
-      mode: 'strict' as const,
-      typeSymbol: `@dsh-std/adapter-dsh#dshStd/command:${name}`,
-      schema: Object.freeze({
-        parse(value: unknown): string {
-          nonEmpty(value, `dshStd.command ${name}`)
-          return value
-        },
-      }),
-    }),
+    codec: strictCodec(`@dsh-std/adapter-dsh#dshStd/command:${name}`, Object.freeze({
+      parse(value: unknown): string {
+        nonEmpty(value, `dshStd.command ${name}`)
+        return value
+      },
+    })),
   })
 }
 
