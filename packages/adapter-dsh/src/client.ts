@@ -214,6 +214,7 @@ const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
  * the standard facet only its scoped ContributionHost client.
  */
 export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeFace {
+  private generation = 0
   private readonly providers: readonly UiContributionProvider[]
 
   constructor(ctx: Context, commandRemote?: DshStdCommandRemote) {
@@ -264,12 +265,15 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
       throw new Error(plan.issues.filter(issue => issue.severity === 'error').map(issue => issue.message).join('; '))
     }
     const selected = plan.selected[0]!
+    const generation = ++this.generation
+    const participantId = `${selected.participantId}@generation-${String(generation)}`
     const identity: ActivationInstanceIdentity = Object.freeze({
       component: manifest.metadata.name,
       version: manifest.metadata.version,
       facet: facet.name,
+      generation,
       instanceId: crypto.randomUUID(),
-      participantId: selected.participantId,
+      participantId,
     })
     const consumer = defineProtocolDeclaration({ participant: { id: identity.participantId }, requires: requirements })
     const declarations = [consumer, ...providerDeclarations]
@@ -284,7 +288,13 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
     if (negotiated?.agreement === undefined) throw new Error('Browser UI facet did not negotiate ContributionHost')
     const host = bindContributionHosts(
       validateContributionHostAgreement(negotiated.agreement),
-      identity,
+      {
+        component: identity.component,
+        version: identity.version,
+        facet: identity.facet,
+        instanceId: identity.instanceId,
+        participantId: identity.participantId,
+      },
       this.providers,
     )
     const scope = new BrowserCleanupScope()

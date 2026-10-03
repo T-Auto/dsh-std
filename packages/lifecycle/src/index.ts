@@ -46,7 +46,10 @@ export interface ActivationInstanceIdentity {
   readonly component: string
   readonly version: string
   readonly facet: string
+  /** Monotonic coordinator-local generation for this activation instance. */
+  readonly generation: number
   readonly instanceId: string
+  /** Participant identity is generation-scoped and MUST NOT be reused by a later activation. */
   readonly participantId: string
 }
 
@@ -138,6 +141,7 @@ interface MutableInstance {
   readonly protocols: ProtocolImplementation[]
   readonly extensions: ExtensionPublication[]
   state: LifecycleState
+  deactivation?: Promise<void>
 }
 
 export class ActivationDriverRegistry {
@@ -216,18 +220,24 @@ export class LifecycleCoordinator {
       }
       return Object.freeze(handles)
     } catch (error) {
-      for (const handle of [...handles].reverse()) await handle.deactivate('activation batch rolled back')
-      throw error
+      const failures: unknown[] = [error]
+      for (const handle of [...handles].reverse()) {
+        try { await handle.deactivate('activation batch rolled back') } catch (failure) { failures.push(failure) }
+      }
+      throw combineErrors(failures, 'activation failed and batch rollback also failed')
     }
   }
 
   private async activateOne(
     plan: CompositionPlan, selected: SelectedFacet, driver: ActivationDriver, activation: ActivationObject,
   ): Promise<ActivationHandle> {
+    const generation = ++this.sequence
+    const participantId = `${selected.participantId}@generation-${String(generation)}`
     const identity: ActivationInstanceIdentity = Object.freeze({
       ...selected.identity,
-      instanceId: `${selected.participantId}:${String(++this.sequence)}`,
-      participantId: selected.participantId,
+      generation,
+      instanceId: `${participantId}:${String(generation)}`,
+      participantId,
     })
     const scope = new Scope()
     const instance: MutableInstance = {
@@ -243,6 +253,7 @@ export class LifecycleCoordinator {
     const preActivation = this.protocols.negotiate([plannedDeclaration, ...this.publications.declarations()])
     const missingRequired = preActivation.issues.filter(issue => issue.severity === 'error')
     if (missingRequired.length > 0) {
+      await scope.close()
       this.transition(instance, 'failed', plan.revision, missingRequired.map(row => row.message).join('; '))
       this.instances.delete(identity.instanceId)
       throw new Error(`facet ${facetKey(selected)} requirements are unavailable: ${missingRequired.map(row => row.message).join('; ')}`)
@@ -296,28 +307,40 @@ export class LifecycleCoordinator {
       this.transition(instance, 'active', plan.revision)
     } catch (error) {
       unpublish()
-      await scope.close()
-      this.transition(instance, 'failed', plan.revision, errorMessage(error))
+      let cleanupError: unknown
+      try { await scope.close() } catch (failure) { cleanupError = failure }
+      const failure = combineErrors(cleanupError === undefined ? [error] : [error, cleanupError], 'activation failed and cleanup also failed')
+      this.transition(instance, 'failed', plan.revision, errorMessage(failure))
       this.instances.delete(identity.instanceId)
-      throw error
+      throw failure
     }
 
     const coordinator = this
     return Object.freeze({
       identity,
       get state() { return instance.state },
-      async deactivate(reason = 'deactivated') {
-        if (instance.state === 'inactive' || instance.state === 'deactivating') return
-        coordinator.transition(instance, 'deactivating', plan.revision, reason)
-        scope.abort(reason)
-        let failure: unknown
-        try { await driver.deactivate?.(identity, reason) } catch (error) { failure = error }
-        try { await scope.close() } catch (error) { failure ??= error }
-        coordinator.instances.delete(identity.instanceId)
-        coordinator.transition(instance, failure === undefined ? 'inactive' : 'failed', plan.revision, failure === undefined ? reason : errorMessage(failure))
-        if (failure !== undefined) throw failure
+      deactivate(reason = 'deactivated') {
+        if (instance.deactivation !== undefined) return instance.deactivation
+        let resolve!: () => void
+        let reject!: (error: unknown) => void
+        instance.deactivation = new Promise<void>((done, fail) => { resolve = done; reject = fail })
+        void coordinator.deactivateInstance(instance, plan.revision, reason).then(resolve, reject)
+        return instance.deactivation
       },
     })
+  }
+
+  private async deactivateInstance(instance: MutableInstance, planRevision: string, reason: string): Promise<void> {
+    const { identity, scope, driver } = instance
+    this.transition(instance, 'deactivating', planRevision, reason)
+    scope.abort(reason)
+    const failures: unknown[] = []
+    try { await driver.deactivate?.(identity, reason) } catch (error) { failures.push(error) }
+    try { await scope.close() } catch (error) { failures.push(error) }
+    this.instances.delete(identity.instanceId)
+    const failure = combineErrors(failures, 'deactivation failed')
+    this.transition(instance, failure === undefined ? 'inactive' : 'failed', planRevision, failure === undefined ? reason : errorMessage(failure))
+    if (failure !== undefined) throw failure
   }
 
   private stageProtocol<T>(instance: MutableInstance, support: ProtocolSupport, implementation: T): () => void {
@@ -331,12 +354,12 @@ export class LifecycleCoordinator {
       throw new TypeError(`facet already staged protocol ${support.apiVersion} ${support.kind}`)
     }
     const row: ProtocolImplementation = Object.freeze({ support: Object.freeze(structuredClone(support)), implementation })
-    instance.protocols.push(row)
     const dispose = () => {
       const index = instance.protocols.indexOf(row)
       if (index >= 0) instance.protocols.splice(index, 1)
     }
     instance.scope.add(dispose)
+    instance.protocols.push(row)
     return dispose
   }
 
@@ -349,12 +372,12 @@ export class LifecycleCoordinator {
     const extension = candidates[0]!
     if (instance.extensions.some(row => row.extension === extension)) throw new TypeError(`facet already staged extension ${name}`)
     const row: ExtensionPublication = Object.freeze({ extension, handler })
-    instance.extensions.push(row)
     const dispose = () => {
       const index = instance.extensions.indexOf(row)
       if (index >= 0) instance.extensions.splice(index, 1)
     }
     instance.scope.add(dispose)
+    instance.extensions.push(row)
     return dispose
   }
 
@@ -364,7 +387,9 @@ export class LifecycleCoordinator {
     const record: LifecycleRecord = Object.freeze({
       identity: instance.identity, from, to, planRevision, time: Date.now(), ...(reason === undefined ? {} : { reason }),
     })
-    for (const listener of this.listeners) listener(record)
+    for (const listener of this.listeners) {
+      try { listener(record) } catch { /* observers cannot change lifecycle control flow */ }
+    }
   }
 }
 
@@ -381,10 +406,13 @@ class Scope implements CleanupScope {
     let settlement: Promise<void> | undefined
     const once = (): Promise<void> => {
       if (settlement !== undefined) return settlement
+      let resolve!: () => void
+      let reject!: (error: unknown) => void
+      settlement = new Promise<void>((done, fail) => { resolve = done; reject = fail })
       try {
-        settlement = Promise.resolve(dispose())
+        Promise.resolve(dispose()).then(resolve, reject)
       } catch (error) {
-        settlement = Promise.reject(error)
+        reject(error)
       }
       void settlement.catch(() => undefined)
       return settlement
@@ -429,6 +457,13 @@ function freezePublication(publication: LivePublication): LivePublication {
 
 function nonEmpty(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${label} must be a non-empty string`)
+}
+
+function combineErrors(values: readonly unknown[], message: string): unknown {
+  const failures = values.filter((value): value is unknown => value !== undefined)
+  if (failures.length === 0) return undefined
+  if (failures.length === 1) return failures[0]
+  return new AggregateError(failures, message)
 }
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }

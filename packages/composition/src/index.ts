@@ -75,9 +75,9 @@ function normalizeManifests(input: readonly ComponentManifest[]): readonly Compo
     unique.set(canonicalJson(manifest), manifest)
   }
   return Object.freeze([...unique.entries()]
-    .sort((left, right) => left[1].metadata.name.localeCompare(right[1].metadata.name)
-      || left[1].metadata.version.localeCompare(right[1].metadata.version)
-      || left[0].localeCompare(right[0]))
+    .sort((left, right) => compareStrings(left[1].metadata.name, right[1].metadata.name)
+      || compareStrings(left[1].metadata.version, right[1].metadata.version)
+      || compareStrings(left[0], right[0]))
     .map(([, manifest]) => manifest))
 }
 
@@ -219,11 +219,11 @@ export function compose(input: CompositionInput, rules = new CompositionRuleCata
   checkRelationships(manifests, byComponent, issues)
 
   const requested = new Map((input.select ?? []).map(selector => [`${selector.component}\0${selector.facet}`, selector]))
-  const drivers = [...input.drivers].sort((left, right) => left.id.localeCompare(right.id))
+  const drivers = [...input.drivers].sort((left, right) => compareStrings(left.id, right.id))
   const selected: SelectedFacet[] = []
   const skipped: SkippedFacet[] = []
   for (const manifest of manifests) {
-    for (const facet of [...manifest.spec.facets].sort((left, right) => left.name.localeCompare(right.name))) {
+    for (const facet of [...manifest.spec.facets].sort((left, right) => compareStrings(left.name, right.name))) {
       const identity = facetIdentity(manifest, facet)
       const selector = requested.get(`${identity.component}\0${identity.facet}`)
       if (input.select !== undefined && selector === undefined) {
@@ -427,14 +427,14 @@ function facetActivationOrder(
       if (provider !== undefined) addEdge(facetKey(provider), facetKey(consumer))
     }
   }
-  const ready = [...nodes.keys()].filter(id => indegree.get(id) === 0).sort()
+  const ready = [...nodes.keys()].filter(id => indegree.get(id) === 0).sort(compareStrings)
   const result: string[] = []
   while (ready.length > 0) {
     const id = ready.shift() as string
     result.push(id)
-    for (const next of [...(outgoing.get(id) ?? [])].sort()) {
+    for (const next of [...(outgoing.get(id) ?? [])].sort(compareStrings)) {
       indegree.set(next, (indegree.get(next) ?? 1) - 1)
-      if (indegree.get(next) === 0) { ready.push(next); ready.sort() }
+      if (indegree.get(next) === 0) { ready.push(next); ready.sort(compareStrings) }
     }
   }
   if (result.length !== nodes.size) {
@@ -445,6 +445,10 @@ function facetActivationOrder(
     ))
   }
   return Object.freeze(result)
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 function facetPath(manifest: ComponentManifest, facet: ComponentFacet): string {
@@ -479,7 +483,7 @@ function canonicalValue(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
     .filter(([, nested]) => nested !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareStrings(left, right))
     .map(([key, nested]) => [key, canonicalValue(nested)]))
 }
 

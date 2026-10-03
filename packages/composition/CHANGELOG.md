@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/composition` are recorded here.
 
+## Unreleased
+
+- Made manifest, driver, and activation ordering comparisons independent of locale-specific collation and added deterministic conflict coverage.
+
 ## 0.1.1-rc.1
 
 - Added protocol-defined requirement/support bindings and provider-before-consumer activation ordering.

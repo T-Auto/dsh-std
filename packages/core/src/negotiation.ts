@@ -199,7 +199,7 @@ export class ProtocolCatalog {
     }
 
     const protocols: NegotiatedProtocol[] = []
-    for (const stored of [...groups.keys()].sort((left, right) => protocolKey(left.definition).localeCompare(protocolKey(right.definition)))) {
+    for (const stored of [...groups.keys()].sort((left, right) => compareStrings(protocolKey(left.definition), protocolKey(right.definition)))) {
       const group = groups.get(stored) as NonNullable<ReturnType<typeof groups.get>>
       let outcome: ProtocolNegotiationOutcome
       try {
@@ -228,7 +228,7 @@ export class ProtocolCatalog {
         participants: Object.freeze([...new Set([
           ...group.requirements.map(row => row.participant),
           ...group.supports.map(row => row.participant),
-        ])].sort()),
+        ])].sort(compareStrings)),
         ...(Object.hasOwn(outcome, 'agreement') ? { agreement: outcome.agreement } : {}),
         issues: protocolIssues,
       }))
@@ -273,6 +273,10 @@ function freezeIssue(issue: ProtocolIssue): ProtocolIssue {
 
 function nonEmpty(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${label} must be a non-empty string`)
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 function errorMessage(error: unknown): string {

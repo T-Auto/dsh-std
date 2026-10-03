@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/core` are recorded here.
 
+## Unreleased
+
+- Made negotiated protocol report ordering independent of locale-specific collation.
+
 ## 0.1.1-rc.2
 
 - Added lossless protocol JSON validation and immutable snapshot helpers for manifest, declaration, agreement, and wire boundaries.

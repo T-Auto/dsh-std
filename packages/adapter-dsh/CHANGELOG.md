@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Adapted lifecycle activation identities to carry a required generation while projecting UI contribution owners through the existing UI owner schema.
+
 ## 0.1.1-rc.4
 
 - Adapted the Host and browser integration to DeepSeek Harness `0.2.0-rc.2`. Peer ranges declare the `0.1.5-rc.2` and `0.2.0-rc.2` lines, the `0.1.2` line is no longer declared, and development pins follow `0.2.0-rc.2`.

@@ -1072,7 +1072,7 @@ export class DshStandardAdapter extends TypertRemoteService {
     this.connectionEndpoint.register({ declaration, implementations })
     this.publications.publish({
       identity: Object.freeze({
-        component: ADAPTER_COMPONENT, version: ADAPTER_VERSION, facet: 'runtime',
+        component: ADAPTER_COMPONENT, version: ADAPTER_VERSION, facet: 'runtime', generation: 0,
         instanceId: `${instanceId}:runtime`, participantId: ADAPTER_PARTICIPANT,
       }),
       declaration,
@@ -1118,7 +1118,13 @@ export class DshStandardAdapter extends TypertRemoteService {
                 if (provider === undefined) throw new Error(`negotiated UI provider ${JSON.stringify(participantId)} is unavailable`)
                 return provider
               })
-              ui = bindContributionHosts(agreement, identity, providers)
+              ui = bindContributionHosts(agreement, {
+                component: identity.component,
+                version: identity.version,
+                facet: identity.facet,
+                instanceId: identity.instanceId,
+                participantId: identity.participantId,
+              }, providers)
               for (const provider of providers) {
                 const bindings = uiBindings.get(provider.participantId) ?? new Set<BoundContributionHost>()
                 bindings.add(ui)
@@ -1226,6 +1232,7 @@ export class DshStandardAdapter extends TypertRemoteService {
           component: ADAPTER_COMPONENT,
           version: ADAPTER_VERSION,
           facet: 'ui-surface-host',
+          generation: 0,
           instanceId,
           participantId: provider.participantId,
         }),

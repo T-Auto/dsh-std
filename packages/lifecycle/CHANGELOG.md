@@ -2,6 +2,11 @@
 
 Changes to `@dsh-std/lifecycle` are recorded here.
 
+## Unreleased
+
+- Closed activation scopes reject late registrations, preserve activation and cleanup failures, isolate observer failures, and share concurrent deactivation settlement.
+- Scope participant identities by a monotonic activation generation so concurrent instances of one facet cannot collide during negotiation.
+
 ## 0.1.1-rc.3
 
 - Made cleanup disposers awaitable and settlement-stable: manual disposal and scope shutdown now share one in-flight cleanup instead of allowing teardown to finish around unfinished work.

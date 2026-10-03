@@ -60,9 +60,13 @@ describe('@dsh-std/lifecycle', () => {
     const [handle] = await coordinator.activate(plan)
     expect(visibleDuringActivation).toBe(0)
     expect(coordinator.publications.declarations()).toEqual([expect.objectContaining({
-      participant: { id: 'example.service.provider@1.0.0#runtime' },
+      participant: { id: 'example.service.provider@1.0.0#runtime@generation-1' },
       supports: [{ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }],
     })])
+    expect(handle?.identity).toMatchObject({
+      generation: 1,
+      participantId: 'example.service.provider@1.0.0#runtime@generation-1',
+    })
     await handle?.deactivate()
     expect(coordinator.publications.list()).toEqual([])
   })
@@ -137,6 +141,135 @@ describe('@dsh-std/lifecycle', () => {
     await handle?.deactivate('test stop')
     expect(abortedAtDeactivate).toBe(true)
     expect(signal?.reason).toBe('test stop')
+  })
+
+  it('rejects registrations after the activation scope has closed', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    let scope: import('../src/index.js').CleanupScope | undefined
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) {
+        scope = context.scope
+        context.protocols.implement({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, {})
+      },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const [handle] = await coordinator.activate(compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() }))
+    await handle?.deactivate()
+    expect(() => scope?.add(() => undefined)).toThrow(/scope is closed/)
+  })
+
+  it('continues cleanup and preserves activation and cleanup failures', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    const activationFailure = new Error('activation failed')
+    const cleanupFailure = new Error('cleanup failed')
+    let secondCleanup = false
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) {
+        context.scope.add(() => { throw cleanupFailure })
+        context.scope.add(() => { secondCleanup = true })
+        throw activationFailure
+      },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const result = coordinator.activate(compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() }))
+    await expect(result).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(AggregateError)
+      const failures = (error as AggregateError).errors
+      expect(failures[0]).toBe(activationFailure)
+      expect(failures[1]).toBeInstanceOf(AggregateError)
+      expect((failures[1] as AggregateError).errors).toContain(cleanupFailure)
+      return true
+    })
+    expect(secondCleanup).toBe(true)
+  })
+
+  it('isolates state listener failures and keeps lifecycle control moving', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) { context.protocols.implement({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, {}) },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    coordinator.onStateChange(() => { throw new Error('observer failed') })
+    const [handle] = await coordinator.activate(compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() }))
+    expect(handle?.state).toBe('active')
+    await handle?.deactivate()
+    expect(handle?.state).toBe('inactive')
+  })
+
+  it('gives concurrent activations of one facet distinct participant identities', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) { context.protocols.implement({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, {}) },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const plan = compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() })
+    const [first] = await coordinator.activate(plan)
+    const [second] = await coordinator.activate(plan)
+    expect(first?.identity.participantId).not.toBe(second?.identity.participantId)
+    expect(first?.identity.generation).toBe(1)
+    expect(second?.identity.generation).toBe(2)
+    expect(coordinator.publications.list().map(row => row.identity.participantId)).toEqual([
+      first?.identity.participantId,
+      second?.identity.participantId,
+    ])
+    await first?.deactivate('replace')
+    expect(coordinator.publications.list().map(row => row.identity.participantId)).toEqual([second?.identity.participantId])
+    await second?.deactivate()
+  })
+
+  it('does not let an older activation cleanup remove a newer generation', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) { context.protocols.implement({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, {}) },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const oldPlan = compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() })
+    const newManifest = defineComponentManifest({
+      ...manifest,
+      metadata: { ...manifest.metadata, version: '1.0.1' },
+    })
+    const newPlan = compose({ manifests: [newManifest], protocols, drivers: drivers.descriptors() })
+    const [oldHandle] = await coordinator.activate(oldPlan)
+    const [newHandle] = await coordinator.activate(newPlan)
+    await oldHandle?.deactivate('replace')
+    expect(coordinator.publications.list().map(row => row.identity.instanceId)).toEqual([newHandle?.identity.instanceId])
+    await newHandle?.deactivate()
+  })
+
+  it('shares one concurrent deactivation and aggregates driver and scope failures', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    const driverFailure = new Error('driver cleanup failed')
+    const scopeFailure = new Error('scope cleanup failed')
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) {
+        context.protocols.implement({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, {})
+        context.scope.add(() => { throw scopeFailure })
+      },
+      async deactivate() { throw driverFailure },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const [handle] = await coordinator.activate(compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() }))
+    const first = handle?.deactivate('stop')
+    const second = handle?.deactivate('stop-again')
+    expect(second).toBe(first)
+    await expect(first).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(AggregateError)
+      expect((error as AggregateError).errors).toEqual([driverFailure, expect.any(AggregateError)])
+      return true
+    })
+    expect(handle?.state).toBe('failed')
   })
 
   it('waits for an already-started disposer and shares repeated cleanup settlement', async () => {

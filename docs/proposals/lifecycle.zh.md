@@ -36,7 +36,7 @@ Composition 先产生可执行的 activation plan。Lifecycle coordinator 按 pl
 
 ### Activation instance
 
-同一 component 的不同 facets 可以分别激活；同一 facet 也可以产生多个运行实例。Activation instance identity 至少包含 component id、发行版本、facet name 和当前 coordinator 范围内唯一的 instance id。
+同一 component 的不同 facets 可以分别激活；同一 facet 也可以产生多个运行实例。Activation instance identity 至少包含 component id、发行版本、facet name、当前 coordinator 范围内单调递增的 generation 和唯一的 instance id。每次 activation 都必须（MUST）生成新的 generation；同一 facet 的并发或替换实例不得复用 generation。用于 core declaration、permission principal 和 provenance 的 participant identity 必须（MUST）绑定 facet identity 与 generation，不能只使用静态 facet key；因此旧 generation 的迟到声明或清理不能与新 generation 合并。
 
 Activation instance 是 lifecycle、cleanup、permission principal 和本地 provenance 的 owner。第一版组件模型为每个 activation instance 分配一个本地 component participant identity；纯 extension facet 可以不把空 declaration 交给 core。产品内建 participant 不要求来自 activation instance。
 
@@ -106,6 +106,10 @@ interface CleanupScope {
 
 Scope 关闭时先触发 abort signal，再按注册的逆序执行 disposer。`add` 返回的 disposer 可以由 owner 提前调用；提前调用、重复调用和 Scope 关闭必须共享同一次清理及其 settlement。Scope 关闭时必须等待已经开始但尚未完成的 disposer，不能因为它已被调用过就把仍在进行的资源释放当作完成。每个 disposer 的主体至多执行一次；某项清理失败不能阻止其余 disposer 运行。
 
+Scope 关闭后必须（MUST）拒绝新的有效 registration；若资源在检查关闭状态前已创建，实现必须（MUST）立即撤销该资源。旧 registration 的 disposer 必须（MUST）仅撤销其具体注册，不能按名称撤销后续 activation instance 的注册。
+
+Activation 失败时必须（MUST）继续清理所有已登记资源。若 cleanup 也失败，结果必须（MUST）保留原始 activation 错误与聚合 cleanup 错误；cleanup 错误不能替换原始 activation 错误。批次回滚中的单项失败也不得阻止其余实例停用。
+
 SDK 提供的 service、event、protocol support、timer 与 background task API 都必须自动登记 disposer。实现代码自行创建、无法由 SDK 观察的资源由 `deactivate` 负责。
 
 ### Deactivation
@@ -119,6 +123,8 @@ SDK 提供的 service、event、protocol support、timer 与 background task API
 5. 执行剩余 disposer；
 6. 验证已发布 support 和 owner records 均已移除；
 7. 进入 `inactive` 或 `failed`。
+
+同一 activation handle 的并发或重复停用必须（MUST）共享一次停用及同一个 settlement。Driver 停用失败与 scope cleanup 失败必须（MUST）同时保留；失败不得阻止 scope 清理或最终状态记录。
 
 Coordinator 为各阶段设置显式 deadline。超过 deadline 后可以继续隔离和移除注册项，但必须留下 timeout 诊断，不能把实例报告为正常停止。
 
@@ -138,7 +144,7 @@ Lifecycle record 是运行时 provenance 的输入。它不应把 activation con
 
 Lifecycle callback 是 coordinator 与 activation instance 之间的控制接口，不是通用 event bus。
 
-产品可以通过 `@dsh-std/events` 发布只读 lifecycle observation，使诊断界面获知状态变化。Observer 不能通过监听事件改变状态机。需要阻断激活的 policy 必须在 composition 或 permission 阶段作出决定，而不是注册任意 `beforeActivate` handler。
+产品可以通过 `@dsh-std/events` 发布只读 lifecycle observation，使诊断界面获知状态变化。Observer 不能通过监听事件改变状态机。状态 listener 抛出的异常必须（MUST）与 lifecycle 控制流隔离，不能阻止 activation、cleanup、后续 listener 或最终状态记录。需要阻断激活的 policy 必须在 composition 或 permission 阶段作出决定，而不是注册任意 `beforeActivate` handler。
 
 ## Security considerations
 

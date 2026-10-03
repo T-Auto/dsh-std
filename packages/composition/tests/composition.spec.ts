@@ -35,6 +35,30 @@ describe('@dsh-std/composition', () => {
     ]))
   })
 
+  it('orders equivalent inputs with byte-stable results regardless of discovery order', () => {
+    const first = compose({
+      manifests: [manifest], protocols,
+      drivers: [{ id: 'example.cordis', apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint' }],
+    })
+    const second = compose({
+      manifests: [...[manifest]], protocols,
+      drivers: [{ id: 'example.cordis', apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint' }],
+    })
+    expect(second.revision).toBe(first.revision)
+    expect(second.activationOrder).toEqual(first.activationOrder)
+  })
+
+  it('reports non-equivalent duplicate components deterministically', () => {
+    const duplicate = defineComponentManifest({
+      ...manifest,
+      metadata: { ...manifest.metadata, version: '1.0.1' },
+    })
+    const plan = compose({ manifests: [duplicate, manifest], protocols, drivers: [] })
+    expect(plan.issues.filter(issue => issue.code === 'component-id-conflict')).toEqual([
+      expect.objectContaining({ components: ['example.multi.surface'] }),
+    ])
+  })
+
   it('lets a protocol rule bind supports and orders the provider before its consumer', () => {
     const value = defineComponentManifest({
       apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
