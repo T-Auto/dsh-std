@@ -93,7 +93,7 @@ Profile 归属方，以及评审与 CI 工具链。
 | 形态 | 载体（示例） | 作者应该预期什么 |
 | --- | --- | --- |
 | 浏览器 shell | DSH 随发行的 `web` 模板 profile | 浏览器 realm 的呈现；UI contribution 可能由浏览器 shell 渲染；没有终端控制序列 |
-| 终端 shell | 生态已声明的 TUI 准入 Profile；正文随终端产品自己的仓库分发 | 终端 realm 的呈现；UI 面是终端形态的；交互以按键与文本为主；预期会遇到该 Profile 自己稳定编号前缀的准入检查（本 Profile 为 `TUI-*`） |
+| 终端 shell | 生态已声明的 [TUI 准入 Profile](dsh-tui.zh.md)；正文随终端产品自己的仓库分发 | 终端 realm 的呈现；UI 面是终端形态的；交互以按键与文本为主；预期会遇到该 Profile 自己稳定编号前缀的准入检查（本 Profile 为 `TUI-*`） |
 | 桌面 GUI | 组合出桌面应用的产品或整合包 | 同一批协议之上的产品自有 shell；预期有它自己的准入与分发规则 |
 | 无 UI（headless / SDK / 自动化） | DSH 随发行的 `headless`、`sdk`、`sdk-minimal`、`acp` 模板 profile | 没有 UI facet 被激活；业务 facet **必须**仍完全可用，**禁止**因为某个 UI 要求而阻塞 |
 
@@ -106,13 +106,15 @@ Profile 归属方，以及评审与 CI 工具链。
 
 - 约定：每个已声明的准入 Profile **可以**在本目录至多有一个页面，命名
   `docs/profiles/<profile-id>.md`，内容包括：Profile id 与名称、产品形态、归属方/载体、
-  权威正文位置（固定到具体 revision）、准入版本、验证入口、信任模型，以及面向以它为
-  目标的插件的作者指引。
-- Profile 的规范性正文**永不**复制到这里；本仓库只登记它在哪里、怎么到达。
-- 当前状态：生态的 profile 层已声明一个 TUI 准入 Profile，其正文随终端产品仓库分发
-  （[ccch1mneyyy/dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)，仓内 `tui-profile/`），
-  机器可读的索引条目尚未发布。本仓库目前还没有任何 per-profile 页面。
-- 希望在此建页的 Profile 归属方**应该**提供上述字段，并给出权威正文的固定位置。
+  权威正文链接、准入版本、验证入口、信任模型，以及面向以它为目标的插件的作者指引。
+- 页面有两种形态：**指针页**只指向归属方正文；**接口参考页**在此之上整理该 Profile 的
+  插件面接口（已挂载的 [TUI 页](dsh-tui.zh.md)就是后者）。两者都从属于归属方：准入策略、
+  要求编号与准入判定仍以归属方正文为准，本页与之不一致时改的是本页。
+- Profile 的规范性准入正文**不**复制到这里；本仓库只登记它在哪里、怎么到达。
+- 已挂载：[dsh-tui.zh.md](dsh-tui.zh.md)——TUI 准入 Profile 的插件接口。生态的 profile 层
+  已声明该 Profile，正文随终端产品仓库分发（[ccch1mneyyy/dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)，
+  仓内 `tui-profile/`），机器可读的索引条目尚未发布。
+- 希望在此建页的 Profile 归属方**应该**提供上述字段，并给出权威正文的链接。
 
 ## 7. 与协议的关系
 
@@ -126,6 +128,7 @@ Profile 归属方，以及评审与 CI 工具链。
 
 ## 8. 参见
 
+- [TUI 准入 Profile——插件接口](dsh-tui.zh.md)
 - [架构](../architecture.zh.md)——产品实现从哪里开始
 - [`@dsh-std/ui` 提案](../proposals/ui-contribution.zh.md)——profile 选择、facet、contribution 与 surface
 - [composition 提案](../proposals/composition.zh.md)——激活规划

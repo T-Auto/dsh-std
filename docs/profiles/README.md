@@ -105,7 +105,7 @@ profiles is the ecosystem's profile layer, and profile names MAY change.
 | Shape | Carrier (example) | What the author SHOULD expect |
 | --- | --- | --- |
 | Browser shell | DSH's shipped `web` template profile | A browser-realm presentation; UI contributions may be rendered by a browser shell; no terminal control sequences |
-| Terminal shell | The ecosystem's declared TUI admission profile; text carried by the terminal product's own repository | A terminal-realm presentation; UI surfaces are terminal-shaped; interaction is key- and text-oriented; expect admission checks with that profile's own stable identifier prefix (for this profile, `TUI-*`) |
+| Terminal shell | The ecosystem's declared [TUI admission profile](dsh-tui.md); its text is carried by the terminal product's own repository | A terminal-realm presentation; UI surfaces are terminal-shaped; interaction is key- and text-oriented; expect admission checks with that profile's own stable identifier prefix (for this profile, `TUI-*`) |
 | Desktop GUI | A product or pack that composes a desktop application | A product-specific shell on top of the same protocols; expect its own admission and distribution rules |
 | No UI (headless / SDK / automation) | DSH's shipped `headless`, `sdk`, `sdk-minimal`, and `acp` template profiles | No UI facet is activated; business facets MUST remain fully usable and MUST NOT block on a UI requirement |
 
@@ -120,16 +120,21 @@ admission text.
 
 - Convention: each declared admission profile MAY have at most one page here, named
   `docs/profiles/<profile-id>.md`, containing: profile id and name, product shape,
-  owner/carrier, authoritative text location (pinned), admission version, verification
-  entry point, trust model, and the author-facing guidance for plugins targeting it.
-- The profile's normative text is **never copied here**. This repository records where it
-  lives and how to reach it.
-- Current state: the ecosystem's profile layer declares a TUI admission profile whose text
-  is carried by the terminal product's repository ([ccch1mneyyy/dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI),
-  in-repo `tui-profile/`), and whose machine-readable registry entry is not yet published.
-  No per-profile page exists in this repository yet.
-- A profile owner who wants a page here SHOULD provide the fields listed above, with a
-  pinned location for the authoritative text.
+  owner/carrier, links to the authoritative text, admission version, verification entry
+  point, trust model, and the author-facing guidance for plugins targeting it.
+- A page takes one of two shapes. A **pointer page** only locates the owner's text. An
+  **interface reference** additionally catalogues the profile's plugin-facing interface, as
+  the mounted [TUI page](dsh-tui.md) does. Both defer to the owner: the owner's text stays
+  authoritative for admission policy, requirement identifiers, and acceptance decisions, and
+  a page here is corrected when it disagrees.
+- The profile's normative admission text is **not copied here**; this repository records
+  where it lives and how to reach it.
+- Mounted: [dsh-tui.md](dsh-tui.md) — the TUI admission profile's plugin interface. The
+  ecosystem's profile layer declares that profile, its text is carried by the terminal
+  product's repository ([ccch1mneyyy/dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI),
+  in-repo `tui-profile/`), and its machine-readable registry entry is not yet published.
+- A profile owner who wants a page here SHOULD provide the fields listed above, with links
+  to the authoritative text.
 
 ## 7. Relationship to protocols
 
@@ -144,6 +149,7 @@ admission text.
 
 ## 8. See also
 
+- [TUI admission profile — plugin interface](dsh-tui.md)
 - [Architecture](../architecture.md) — where product implementations begin
 - [`@dsh-std/ui` proposal](../proposals/ui-contribution.zh.md) — profile selection, facets, contributions, and surfaces
 - [Composition proposal](../proposals/composition.zh.md) — activation planning
