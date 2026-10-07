@@ -62,6 +62,7 @@ Profiles               admission and interoperability specifications for concret
 ## Start here
 
 - Read the [architecture](docs/architecture.md) for the boundary between the meta-protocol, independent protocols, and product implementations.
+- Read the [cross-profile application guide](docs/profiles/README.md) to see how one plugin package relates to the several profile compositions that may mount it — browser, terminal, desktop, or no user interface at all.
 - The current design work is indexed in the [Chinese proposal index](docs/proposals/README.zh.md).
 - See the [Endpoint Connection proposal](docs/proposals/endpoint-connection.zh.md) for connection negotiation and attachments.
 - Use the [package index](packages/README.md) to select the smallest implemented package surface.

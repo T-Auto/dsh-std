@@ -62,6 +62,7 @@ Profile            面向具体产品形态的准入与互操作规范，由生�
 ## 从这里开始
 
 - 阅读[架构说明](docs/architecture.zh.md)，了解元协议、独立协议与产品实现的边界。
+- 阅读[跨 Profile 应用指南](docs/profiles/README.zh.md)，了解同一个插件包与可能挂载它的多个 profile 组合之间的关系——浏览器、终端、桌面，以及完全没有用户界面的形态。
 - 各组件的拟议设计集中在[设计提案索引](docs/proposals/README.zh.md)。
 - `@dsh-std/connection` 的设计提案见 [Endpoint Connection](docs/proposals/endpoint-connection.zh.md)。
 - 通过[包索引](packages/README.zh.md)挑选需要的协议包。

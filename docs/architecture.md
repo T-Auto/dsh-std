@@ -53,7 +53,7 @@ A protocol package may contain types, schemas, codecs, negotiation algorithms, s
                     implement selected protocols
 ```
 
-A product selects protocols and binds their operations to runtime capabilities. Filesystems, networking, credentials, processes, user interfaces, and policy belong to the product implementation.
+A product selects protocols and binds their operations to runtime capabilities. Filesystems, networking, credentials, processes, user interfaces, and policy belong to the product implementation. The same plugin package may be mounted by several such shapes — see the [cross-profile application guide](profiles/README.md).
 
 ## Declarations and negotiation
 
