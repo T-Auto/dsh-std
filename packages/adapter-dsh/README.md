@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The DeepSeek Harness product adapter described by the [adapter proposal](../../docs/proposals/adapter-dsh.zh.md). Cordis, Typert, Agent, and DSH command-registry types stop at this package.
+The DeepSeek Harness product adapter. See the [Adapter design](../../docs/proposals/adapter-dsh.zh.md) and [this package's implementation](../../docs/proposals/adapter-dsh-reference.zh.md). Cordis, Typert, Agent, and DSH command-registry types stop at this package.
 
 This package provides an adapter compatible with this project for integrators to use.
 

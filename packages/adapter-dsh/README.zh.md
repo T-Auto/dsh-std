@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-DeepSeek Harness 的产品适配层。设计见 [DeepSeek Harness Adapter](../../docs/proposals/adapter-dsh.zh.md)。Cordis、Typert、Agent 与 DSH command registry 的类型止于此包。
+DeepSeek Harness 的产品适配层。参见 [Adapter 设计](../../docs/proposals/adapter-dsh.zh.md)和[本项目 Adapter 的实现](../../docs/proposals/adapter-dsh-reference.zh.md)。Cordis、Typert、Agent 与 DSH command registry 的类型止于此包。
 
 本包提供本项目兼容的adapter产品,供集成方使用.
 

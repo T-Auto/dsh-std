@@ -55,7 +55,9 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 
 | 组件 | 提案 | 状态 |
 | --- | --- | --- |
-| `@dsh-std/adapter-dsh` | [DeepSeek Harness Adapter](adapter-dsh.zh.md) | 草案 |
+| Adapter | [Adapter 设计](adapter-dsh.zh.md) | 草案 |
+| `@dsh-std/adapter-dsh` | [本项目 Adapter 的实现](adapter-dsh-reference.zh.md) | 草案 |
+| Adapter 接入 | [Adapter 接入 std 所需接口](adapter-std-interfaces.zh.md) | 草案 |
 | Conformance | [Conformance and Validation](conformance.zh.md) | 探索性草案 |
 | Provenance | [Impact and Ownership Records](provenance.zh.md) | 探索性草案 |
 
