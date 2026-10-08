@@ -2,31 +2,56 @@
 
 English | [中文](README.zh.md)
 
-The DeepSeek Harness product adapter. See the [Adapter design](../../docs/proposals/adapter-dsh.zh.md) and [this package's implementation](../../docs/proposals/adapter-dsh-reference.zh.md). Cordis, Typert, Agent, and DSH command-registry types stop at this package.
+The DeepSeek Harness product adapter, connecting standard components to DSH commands, tools, models, sessions, and browser UI.
 
 This package provides an adapter compatible with this project for integrators to use.
 
-`DshStandardAdapter` owns protocol and manifest definition catalogs, activation drivers, a lifecycle coordinator, and a connection endpoint. It is not a global plugin registry.
+## Installation
 
-This package is itself a DSH profile bundle and is activated by its `cordis.patch.yml`. It scans the active profile's ordinary dependencies for Community v0.15 `dsh-plugin.json`, negotiates `requires.contracts`, and loads `facets.host.entry`. Standard plugins neither declare `dsh.bundle` nor import this adapter.
-
-In a browser-capable profile, the adapter's own DSH browser half reads standard `browser.ui.dsh/v1alpha1 LocalModule` declarations, serves their package-local artifacts, and activates them through the DSH `0.2.0-rc.2` API Gateway, Session Controller, client module system, and Cordis lifecycle. The `0.1.5-rc.2` line remains supported by the same artifact. Components do not need a root Loader entry or `dsh.client` metadata. TUI and headless profiles do not load these modules; only browser transport and UI peers are optional, while the Host adapter requires the `sessionController` service.
-
-The browser half implements the optional `@dsh-std/ui-browser` `SettingsSection` and `ToolCallView` surfaces. It waits for the corresponding native slots with `slots.inject()`, negotiates a facet-scoped `ui.dsh/v1alpha1 ContributionHost`, and retracts every slot registration when the standard browser-realm facet unloads. Components import the surface protocol package, never this adapter; raw DSH slot names remain inside the adapter. The DSH Plugins page receives a separate standard-component inventory tab, so standard lifecycle state is visible without manufacturing Cordis Loader rows.
-
-Commands remain executable through the standard `CommandRuntime`. A product UI publishes commands into its native command registry only after registering a provider for an exact placement coordinate. Web, Desktop, TUI, and other shells are therefore capabilities, not hard-coded profile classes.
+Install the adapter and standard components in the same profile:
 
 ```sh
 dsh plugin --profile web add @dsh-std/adapter-dsh
 dsh plugin --profile web add <standard-component>
 ```
 
-Other hosts may call `mount()` directly. Module resolution and product-service projection remain responsibilities of the host adapter and do not enter the portable component.
+## How it runs
 
-The entrypoint stages facts with `context.protocols.implement()` and `context.extensions.publish()`. They become live publications and connection declarations only after activation, static-bound validation, and protocol negotiation succeed. Failure or unmount revokes everything by activation-instance owner.
+This package is a DSH profile bundle activated by `cordis.patch.yml`. The adapter scans the active profile's dependencies for Community v0.15 `dsh-plugin.json`, validates component declarations, and loads facet entrypoints.
 
-The current mappings implement `CommandRuntime`, `ModelCatalog`, `SessionCatalog` list/get/create/rename, `SessionHistory` read/follow, local `Tool` / `ToolOverride` activation, package-local lazy `Skill` resources, and browser-local UI contributions. Skill resources are projected through DSH's native provider registry automatically; users do not install a second bridge package, while portable components still depend only on `@dsh-std/skill`. Session descriptors and history use the Session Controller's cold-safe list/inspect/follow seams. The adapter does not claim delete, watch, or idempotent fork operations for which DSH does not expose equivalent semantics. Product-native DSH events are portable but ignorable; component-declared `SessionEvent` resources retain their replay classification.
+`DshStandardAdapter` coordinates protocol negotiation and activation, supplies the APIs components need, and connects their published capabilities to product services. The host side requires the `sessionController` service.
 
-`SessionCatalog.create` retains the initial input and completed result for each request ID, preserving the existing request-to-session ID mapping across connections. Retries return that result without undoing subsequent renames; changed input is rejected. These receipts live in the adapter instance. If the adapter is recreated and a request ID addresses an existing Session, it returns the current descriptor without initializing its title again; replaying the original result and checking the original input across a restart require durable receipts, which this adapter does not yet store. Request IDs remain shared across consumers of the adapter, so callers should use globally unique request IDs.
+To publish built-in host capabilities first, start the adapter with `discover: false`, then load `@dsh-std/adapter-dsh/profile-loader` for component discovery and activation. Integrators can also call `mount()` directly with a declaration, facet name, and activation function.
 
-Tool functions never cross the connection endpoint: the adapter registers them into DSH's native registry and supplies DSH model, attachment, filesystem observation, write-intent, sandbox, and nested-context semantics for each accepted call. Catalog entries come only from extensions published by active facets and retain component, facet, and participant provenance. The adapter does not serialize Presentation work into command results; a Connection Host must supply invocation-scoped typed clients for active Presentation agreements.
+## Capabilities
+
+| Capability | Integration |
+| --- | --- |
+| Commands | Provides the catalog and `CommandRuntime`; a product UI registers a provider for a placement to expose matching commands in its native command entrypoint |
+| Models | Connects model handlers to the DSH LLM registry and provides `ModelCatalog` |
+| Tools | Connects `Tool` and `ToolOverride` to Agent tool execution |
+| Skills | Uses the native Skill provider registry and reads package-local Markdown on demand |
+| Sessions | Provides SessionCatalog list/get/create/rename and SessionHistory read/follow |
+| Browser UI | Loads standard browser modules and provides SettingsSection and ToolCallView surfaces |
+
+Tools execute locally in DSH, using the product's model, attachment, filesystem access, write-intent, sandbox, and nested-context facilities.
+
+The browser half reads `LocalModule` declarations, serves package-local artifacts, and connects them to native UI slots. UI registrations are removed when their facet stops. The DSH Plugins page displays standard components and their runtime state.
+
+## Publication and cleanup
+
+During activation, components register protocol implementations with `context.protocols.implement()` and extension handlers with `context.extensions.publish()`. Capabilities become callable after activation, validation, and negotiation succeed.
+
+Registrations belong to the current activation instance. On activation failure, unmount, or shutdown, the adapter removes that instance's capabilities, product registrations, and connection declarations.
+
+## Session creation requests
+
+`SessionCatalog.create` stores the initial input and completed result for each request ID. Retries within the adapter instance return the original result while preserving later renames; changed input under the same ID returns an error. Callers should use globally unique request IDs.
+
+Request records live in the adapter instance. After the adapter is recreated, a repeated request that identifies an existing session returns its current state and preserves its title.
+
+## Documentation
+
+- [Adapter design](../../docs/proposals/adapter-dsh.zh.md): its purpose and place in std.
+- [This adapter's implementation](../../docs/proposals/adapter-dsh-reference.zh.md): loading, activation, product integration, and shutdown.
+- [Interfaces for std integration](../../docs/proposals/adapter-std-interfaces.zh.md): interfaces to implement when adapting your own code.

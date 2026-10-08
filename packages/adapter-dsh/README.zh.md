@@ -2,35 +2,56 @@
 
 [English](README.md) | 中文
 
-DeepSeek Harness 的产品适配层。参见 [Adapter 设计](../../docs/proposals/adapter-dsh.zh.md)和[本项目 Adapter 的实现](../../docs/proposals/adapter-dsh-reference.zh.md)。Cordis、Typert、Agent 与 DSH command registry 的类型止于此包。
+DeepSeek Harness 的产品适配层，将标准组件接入 DSH 的命令、工具、模型、会话和浏览器 UI。
 
 本包提供本项目兼容的adapter产品,供集成方使用.
 
-`DshStandardAdapter` 持有协议 definition catalog、manifest definition catalog、activation drivers、lifecycle coordinator 和 connection endpoint。它不是全局插件注册表。
+## 安装
 
-这个包自身是 DSH profile bundle；安装后由 `cordis.patch.yml` 激活。adapter 会读取当前 profile 的普通 dependencies，发现并校验其中的 Community v0.15 `dsh-plugin.json`，协商 `requires.contracts`，再装载 `facets.host.entry`。标准插件本身不需要声明 `dsh.bundle`，也不需要引用这个 adapter。
-
-在具备 browser surface 的 profile 中，adapter 自己的 DSH browser half 会读取标准 `browser.ui.dsh/v1alpha1 LocalModule` 声明，提供 package 内的模块产物，并通过 DSH `0.2.0-rc.2` 的 API Gateway、Session Controller、client module system 与 Cordis lifecycle 激活；同一 artifact 也继续支持 `0.1.5-rc.2` 线。组件不需要 Cordis 根 Loader entry，也不需要 `dsh.client` metadata。TUI 与 headless profile 不会装载这些模块；仅 browser transport 与 UI peer 为 optional，Host adapter 则要求 `sessionController` 服务。
-
-Browser half 实现可选的 `@dsh-std/ui-browser` `SettingsSection` 与 `ToolCallView` surfaces。它用 `slots.inject()` 等待对应的原生 slot，通过协商为 browser-realm facet 签发 activation-scoped `ui.dsh/v1alpha1 ContributionHost`，并在 facet 卸载时撤销全部 slot registration。组件只导入 surface 协议包，不导入本 adapter；原始 DSH slot 名保留在 adapter 内。DSH 的“插件”页会增加独立的“标准组件”清单，显示标准 lifecycle 状态，而不会伪造 Cordis Loader row。
-
-命令始终可以通过标准 `CommandRuntime` 执行。产品 UI 只有为精确 placement 坐标注册 provider 后，才会把匹配的命令投影到原生命令 registry。Web、Desktop、TUI 或其他 shell 不构成协议内置分类。
-
-Host 需要先发布内建 participant 时，可以用 `discover: false` 只启动 adapter core，并在这些 publication 就绪后挂载 `@dsh-std/adapter-dsh/profile-loader`。后者只执行 profile component discovery 与 activation，不会创建第二个 adapter。
+将 Adapter 和标准组件安装到同一 profile：
 
 ```sh
 dsh plugin --profile web add @dsh-std/adapter-dsh
 dsh plugin --profile web add <standard-component>
 ```
 
-其他宿主也可以直接调用 `mount()`，但模块解析和产品服务映射属于宿主 adapter 的职责；它们不进入标准组件。
+## 运行方式
 
-Entrypoint 在激活期间通过 `context.protocols.implement()` 与 `context.extensions.publish()` 暂存事实。只有激活成功、静态范围校验及协议协商通过后，它们才越过 publication barrier，进入 live publication 与 connection offer。激活失败或卸载会按 activation instance owner 撤销全部结果。
+本包是 DSH profile bundle，由 `cordis.patch.yml` 激活。Adapter 读取当前 profile 的 dependencies，发现 Community v0.15 `dsh-plugin.json`，校验组件声明并读取 facet 入口。
 
-当前 DSH 映射实现 `CommandRuntime`、`ModelCatalog`、`SessionCatalog` 的 list/get/create/rename、`SessionHistory` 的 read/follow、本地 `Tool` / `ToolOverride` activation、package-local lazy `Skill` resource 与 browser-local UI contribution，并在协议目录中装载 `MessageObserver`、`LocalStorage` 与 Presentation definitions。Skill resource 自动投影到 DSH 原生 provider registry；用户无需再安装一个 bridge 包，而可移植组件仍只依赖 `@dsh-std/skill`。Session descriptor 与 history 来自 `sessionController` 的 cold-safe list/inspect/follow seam；adapter 不宣称 DSH 尚未提供同等删除、watch 或幂等 fork 语义的 operation。DSH 原生 event 对 portable reader 标记为 ignorable，标准组件声明的 `SessionEvent` 则保留其 replay 分类。
+`DshStandardAdapter` 组织协议协商与激活，向组件提供所需 API，并将组件发布的能力接入产品服务。宿主侧需要 `sessionController` 服务。
 
-`SessionCatalog.create` 按 request ID 保存初始输入与已完成结果，保留原有的跨连接 request ID 到 Session ID 映射。重试直接返回原结果，不撤销后续改名；同一 ID 改变输入会被拒绝。这些请求记录保存在 adapter 实例中。Adapter 重建后，request ID 若对应已有 Session，则返回当前 descriptor，不再初始化标题；跨重启重放原始结果和核对原始输入需要持久化请求记录，当前 adapter 尚未保存这种记录。Request ID 仍由该 adapter 的所有 consumer 共享，调用方应使用全局唯一的 request ID。
+需要先提供宿主内建能力时，可设置 `discover: false` 启动 Adapter，再加载 `@dsh-std/adapter-dsh/profile-loader` 执行组件发现与激活。集成方也可以直接调用 `mount()`，提交声明、facet 名称和激活函数。
 
-工具函数不会穿过 connection endpoint；adapter 把它们注册进 DSH 原生 registry，并在每次已接受调用中提供 DSH 的模型、附件、filesystem observed、write-intent、sandbox 与嵌套 context 语义。装载 definition 不会发布相应 support；只有实际 Host participant 越过 publication barrier 后，required contract 才能协商成功。命令和模型目录只使用 active facet 已发布的 extension，并保留 component、facet、participant provenance。Adapter 不会把 Presentation 操作序列化到命令结果；当前 agreement 的类型化 client 必须由 Connection Host 按 invocation scope 提供。
+## 提供的能力
 
-Typert 只是 DSH 当前暴露 adapter service 的方式，不是 `@dsh-std/connection` 的线协议要求。
+| 能力 | 接入方式 |
+| --- | --- |
+| 命令 | 提供命令目录和 `CommandRuntime`；产品 UI 注册对应 placement 的 provider 后，命令进入该 UI 的原生命令入口 |
+| 模型 | 将模型处理函数接入 DSH LLM registry，并提供 `ModelCatalog` |
+| 工具 | 将 `Tool` 和 `ToolOverride` 接入 Agent 的工具运行环境 |
+| Skill | 接入原生 Skill provider registry，按请求读取包内 Markdown |
+| 会话 | 提供 `SessionCatalog` 的 list/get/create/rename，以及 `SessionHistory` 的 read/follow |
+| 浏览器 UI | 加载标准浏览器模块，提供 `SettingsSection` 和 `ToolCallView` surfaces |
+
+工具在 DSH 本地执行，使用产品提供的模型、附件、文件访问、写入意图、sandbox 和嵌套上下文。
+
+浏览器部分读取 `LocalModule` 声明，提供包内模块产物并接入原生 UI slot。UI 注册随所属 facet 停用而撤销。DSH 的“插件”页显示标准组件及其运行状态。
+
+## 发布与清理
+
+组件在激活期间通过 `context.protocols.implement()` 登记协议实现，通过 `context.extensions.publish()` 登记扩展处理函数。激活、校验和协商成功后，这些能力进入可调用状态。
+
+注册项关联到本次激活实例。激活失败、卸载或停止时，Adapter 按实例撤销能力、产品注册和连接声明。
+
+## 会话创建请求
+
+`SessionCatalog.create` 按 request ID 保存初始输入和完成结果。实例内重复请求返回原结果并保留后续改名；同一 ID 改变输入会返回错误。调用方应使用全局唯一的 request ID。
+
+请求记录保存在 Adapter 实例内。Adapter 重建后，重复请求若对应已有会话，则返回该会话的当前状态，并保留已有标题。
+
+## 文档
+
+- [Adapter 设计](../../docs/proposals/adapter-dsh.zh.md)：Adapter 的作用及其在 std 中的位置。
+- [本项目 Adapter 的实现](../../docs/proposals/adapter-dsh-reference.zh.md)：加载、激活、产品接入与卸载。
+- [Adapter 接入 std 所需接口](../../docs/proposals/adapter-std-interfaces.zh.md)：自行实现 Adapter 时需要对接的接口。
