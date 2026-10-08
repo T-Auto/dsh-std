@@ -30,14 +30,16 @@ The upstream DSH core and downstream ecosystem plugins have inherently different
 - **Upstream DSH focuses on rapid innovation**: Its mission is to build the fastest, most capable Agent execution engine, requiring frequent iteration over model scheduling, context engineering, and internal architecture. The core should not have its hands tied by external UI variations or third-party interop standards.
 - **Downstream plugins need stable contracts**: Plugin authors want to focus on feature logic without worrying that their code will break with every upstream update.
 
-**The Adapter serves as a single-point shock absorber**:
-It isolates the upstream runtime from the universal protocol layer. DSH is free to refactor aggressively; all potential breaking changes are absorbed within a single adapter layer ([`@dsh-std/adapter-dsh`](packages/adapter-dsh/README.md)), shielding the broader ecosystem from code churn. Similarly, standalone TUIs, Web frontends, and remote runners can plug in via their own adapters on equal footing.
+**Adapter functions and implementation**
+An adapter maps internal product services to the standard protocols the product adopts. Reusable adapters can reduce repeated product API integration work for third-party plugins. Each project can design its own adapter or use an existing implementation.
+
+Third-party plugins target the protocol contracts they adopt; adapter internals and package names are not a shared entrypoint. [`@dsh-std/adapter-dsh`](packages/adapter-dsh/README.md) provides a set of mappings for DeepSeek Harness. TUIs, Web frontends, remote runners, and other integrators can provide their own implementations. Compatibility depends on protocol versions, live capabilities, and product mappings.
 
 ## What else is great about this (Beyond stable dependencies)?
 
-Shielding plugins from upstream breaking changes is just the baseline. In day-to-day development, this architecture brings several concrete superpowers:
+Separating protocol contracts from product implementations supports the following development patterns:
 
-- **True Write-Once, Run-Anywhere (No multi-platform rewrites)**: Authors write their plugins against standard protocol contracts. Once written, the exact same plugin code runs without changes in TUI terminals, Web browsers, Remote SSH services, or headless daemon containers.
+- **Less repeated platform integration**: Plugins can reuse business logic that follows protocol contracts, while each product's mappings connect it to local capabilities.
 - **On-Demand Activation & Zero Leaks (Facet model)**: A single plugin package can contain both frontend UI and backend logic. A host only activates the facets it needs (e.g., a headless server never loads frontend UI code). When a plugin is disabled or uninstalled, all listeners, timers, and resources are automatically garbage-collected by the scope.
 - **Know Before Installing (No crash roulette)**: With static manifests (`dsh-plugin.json`), marketplaces, hosts, and CI tools calculate compatibility in milliseconds **without running a single line of plugin code**. No more installing a plugin only to find out it crashes at runtime.
 - **Blazing-fast Headless Unit Tests**: The protocol core consists entirely of pure data structures and pure-function negotiators. Testing plugins or hosts takes tens of milliseconds in lightweight Node.js/CI—no need to spin up a full DSH instance or heavy browser.

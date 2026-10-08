@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 The DeepSeek Harness product adapter described by the [adapter proposal](../../docs/proposals/adapter-dsh.zh.md). Cordis, Typert, Agent, and DSH command-registry types stop at this package.
 
+This package provides an adapter compatible with this project for integrators to use.
+
 `DshStandardAdapter` owns protocol and manifest definition catalogs, activation drivers, a lifecycle coordinator, and a connection endpoint. It is not a global plugin registry.
 
 This package is itself a DSH profile bundle and is activated by its `cordis.patch.yml`. It scans the active profile's ordinary dependencies for Community v0.15 `dsh-plugin.json`, negotiates `requires.contracts`, and loads `facets.host.entry`. Standard plugins neither declare `dsh.bundle` nor import this adapter.

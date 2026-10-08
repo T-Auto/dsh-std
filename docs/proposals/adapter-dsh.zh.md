@@ -8,6 +8,8 @@
 
 `@dsh-std/adapter-dsh` 是 DeepSeek Harness 对 DSH Standard 的实现与适配层。它把 Cordis plugin、DSH command、Agent、workspace、UI 和其他产品服务映射到实现选择的标准协议。
 
+Adapter 是产品实现标准协议的一种适配方式。项目或集成方可以自行设计适配实现或复用已有实现。本文规定本适配方案的 DSH 映射与接入边界；其他实现可以采用不同的内部接口与打包方式，协议符合性仍由所采用协议的可观察行为决定。
+
 Adapter 不是可移植协议，也不是所有标准能力的中央注册表。它由一个小型基础层和按协议安装的映射组成；新增标准协议不要求修改 core，也不应让未使用该协议的 DSH profile 获得额外依赖。
 
 Cordis、Typert、DSH Agent 与具体 UI 类型只出现在 adapter 内部。
@@ -16,7 +18,7 @@ Cordis、Typert、DSH Agent 与具体 UI 类型只出现在 adapter 内部。
 
 标准协议描述互操作语义，不知道 DeepSeek Harness 如何加载插件、定位 session、执行命令、注册 tool 或创建 UI。产品必须完成这些映射，但插件不应各自 patch 同一套内部 API，也不应让 Host、TUI 或 connector 依赖某个业务插件。
 
-DSH adapter 提供共同的产品边界：
+本适配方案提供可复用的 DSH 产品边界，减少组件重复对接产品 API 的工作：
 
 - 读取受支持版本的 `dsh-plugin.json`，并把 Host facet 投影到 DSH activation；
 - 把 Cordis activation/disposal 映射到标准 lifecycle；
@@ -36,13 +38,13 @@ DSH adapter 提供共同的产品边界：
 - permission decisions 与 scoped API issuer；
 - registration ownership 和诊断记录。
 
-这些是 DSH 实现细节。标准插件只通过 manifest、已协商协议 API 和 SDK facade 使用它们，不取得裸 Cordis context。
+这些是本适配方案的 DSH 实现细节。采用该接入方式的 facet 通过 manifest、已协商协议 API 和 scoped facade 使用所需能力，不取得裸 Cordis context。其他适配实现可以自行组织内部后端，组件与宿主之间的共同契约由所采用协议规定。
 
 Adapter 不存在时，DSH 按原有方式工作。其他插件不能假定标准 SDK backend 一定存在；需要它的 facet 由其 activation kind 或 DSH 产品依赖显式表达。
 
 ### Bootstrap boundary
 
-Manifest 不能自行令宿主发现并执行 adapter。DSH 必须通过已有的正式插件安装或 profile 组合机制挂载基础 adapter；这是一次产品 bootstrap，不是每个标准 component 各自 patch DSH。
+Manifest 不能自行令宿主发现并执行 adapter。采用本适配方案时，DSH 必须通过已有的正式插件安装或 profile 组合机制挂载基础 adapter；这是一次产品 bootstrap，不是每个标准 component 各自 patch DSH。其他适配实现的 bootstrap 由相应产品或集成方安排。
 
 基础 adapter 激活后向 DSH loader 注册它实现的 activation definitions、drivers 和 SDK backend。此后安装器发现 `dsh-plugin.json`，按 `$schema` 与 `manifestVersion` 校验受支持的 Manifest 版本，再把其中的 Host facet 投影到内部 activation。插件不需要知道 `dsh-host`、TUI、Web 或 adapter 的内部 service 名称。
 
@@ -271,9 +273,9 @@ Carrier-specific metadata 不进入 command/tool/model 等领域 API。
 - 把独占目标和版本范围报告给 composition/provenance；
 - 对 API 漂移给出结构化不兼容结果。
 
-标准插件依赖的是 adapter 提供的协议 API，不依赖 hook 目标。DSH 获得正式扩展点后可以替换内部映射，而不改变标准协议。
+采用本提案接入方式的 facet 消费已协商的协议 API，hook 目标保留在所选适配实现内部。DSH 获得正式扩展点后可以替换内部映射，而不改变标准协议。
 
-Hook 只能位于 adapter 的产品映射或一次 bootstrap 边界。某个 component 若需要 adapter 尚未提供的 DSH 能力，应增加领域协议或 DSH 专属 extension/activation contract；不能在自身 activation 中重新 patch 同一个产品目标。
+本提案中的 hook 位于所选适配实现的产品映射或 bootstrap 边界。采用该接入方式的 component 若需要尚未提供的 DSH 能力，集成方可以扩展或另行提供产品映射，并通过领域协议或 DSH 专属 extension/activation contract 暴露能力；facet 不在自身 activation 中重复 patch 该适配实现负责的产品目标。
 
 ### DeepSeek Harness 版本线
 

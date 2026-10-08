@@ -55,6 +55,8 @@ A protocol package may contain types, schemas, codecs, negotiation algorithms, s
 
 A product selects protocols and binds their operations to runtime capabilities. Filesystems, networking, credentials, processes, user interfaces, and policy belong to the product implementation. The same plugin package may be mounted by several such shapes — see the [cross-profile application guide](profiles/README.md).
 
+An adapter connects protocol contracts to product capabilities. Adapters can also be independently designed. This project provides its own adapter in `@dsh-std/adapter-dsh` for others to use, reducing API integration work.
+
 ## Declarations and negotiation
 
 Negotiation keeps three facts separate:
