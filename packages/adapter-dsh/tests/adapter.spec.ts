@@ -1293,6 +1293,76 @@ export default {
     },
   )
 
+  it.each(['v1-only', 'both'])('does not revive old agreements after same-object provider re-registration (%s)', async mode => {
+    const { adapter } = await fixture()
+    const surface = { apiVersion: 'example.ui/v1', kind: 'Settings' }
+    const extra = { apiVersion: 'example.ui/v1', kind: 'Panel' }
+    const registered: string[] = []
+    const provider: UiContributionProvider = {
+      participantId: 'ui/reused-object',
+      support: { surfaces: [surface, extra].map(row => ({ ...row, modes: ['host-rendered'] })) },
+      register(_owner, contribution) {
+        const id = contribution.descriptor.id
+        registered.push(id)
+        return () => { registered.splice(registered.indexOf(id), 1) }
+      },
+    }
+    const versions = ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] as const
+    const requirements = [
+      contributionHostRequirement({ surfaces: [{ ...surface, mode: 'host-rendered' }] }),
+      contributionHostRequirementV2({
+        surfaces: [{ ...surface, mode: 'host-rendered' }],
+        optionalSurfaces: [{ ...extra, mode: 'host-rendered' }],
+      }),
+    ]
+    const manifest = (name: string, requires = requirements) => defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name, version: '1.0.0' },
+      spec: { facets: [{
+        name: 'ui',
+        activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'ui' } },
+        protocols: { requires },
+      }] },
+    })
+    const unregisterOld = adapter.registerUiContributionProvider(provider, { apiVersions: versions })
+    let oldV1: ContributionHostClient | undefined
+    let lateV2: () => ContributionHostClient | undefined = () => undefined
+    const disposeOld = await adapter.mount({
+      manifest: manifest('example.old-provider-agreement'), facet: 'ui',
+      activate(activation) {
+        oldV1 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })
+        oldV1!.register({ descriptor: { id: 'old', surface, content: {} } })
+        lateV2 = () => activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })
+      },
+    })
+    await unregisterOld()
+    expect(registered).toEqual([])
+    const unregisterNew = mode === 'v1-only' ? adapter.registerUiContributionProvider(provider)
+      : adapter.registerUiContributionProvider(provider, { apiVersions: versions })
+    try {
+      expect(lateV2).toThrow(/unavailable/)
+      expect(() => oldV1!.register({ descriptor: { id: 'stale', surface, content: {} } })).toThrow(/closed/)
+      await disposeOld()
+      await unregisterOld()
+      const disposeNew = await adapter.mount({
+        manifest: manifest('example.new-provider-agreement', mode === 'v1-only' ? [requirements[0]!] : requirements), facet: 'ui',
+        activate(activation) {
+          activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })!
+            .register({ descriptor: { id: 'new', surface, content: {} } })
+          const v2 = activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })
+          if (mode === 'v1-only') expect(v2).toBeUndefined()
+          else v2!.register({ descriptor: { id: 'new-extra', surface: extra, content: {} } })
+        },
+      })
+      expect(registered.sort()).toEqual(mode === 'v1-only' ? ['new'] : ['new', 'new-extra'])
+      await disposeNew()
+      expect(registered).toEqual([])
+    } finally {
+      await disposeOld()
+      await unregisterNew()
+    }
+  })
+
   it('revokes both Host clients immediately while provider cleanup is pending', async () => {
     const { adapter } = await fixture()
     const surface = { apiVersion: 'example.ui/v1', kind: 'Settings' }

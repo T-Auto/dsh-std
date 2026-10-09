@@ -40,7 +40,7 @@ dsh plugin --profile web add <standard-component>
 
 ## UI ContributionHost 版本
 
-Host 集成调用 `registerUiContributionProvider(provider)` 时默认只声明 `ui.dsh/v1alpha1`，保持已有行为。显式启用时，第二个参数传入 `{ apiVersions: ['ui.dsh/v1alpha2'] }` 或 `{ apiVersions: ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] }`。空列表、未知版本与重复版本会被拒绝。Support 描述 provider 实际提供的 surfaces；V1 support 不满足 V2 requirement。
+Host 集成调用 `registerUiContributionProvider(provider)` 时默认只声明 `ui.dsh/v1alpha1`，保持已有行为。显式启用时，第二个参数传入 `{ apiVersions: ['ui.dsh/v1alpha2'] }` 或 `{ apiVersions: ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] }`。空列表、未知版本与重复版本会被拒绝。Support 描述 provider 实际提供的 surfaces；V1 support 不满足 V2 requirement。撤销后重新注册相同 provider 对象或 participant 不得恢复旧 agreement；consumer 必须通过新的 activation 与新注册协商。
 
 独立 browser runtime 为 SettingsSection 与 ToolCallView surfaces 实际声明两个精确 ContributionHost 版本。Facet 按其声明且实际获得 surface 授权的版本分别取得 client，每个 client 只含该版本的已协商授权。整体 optional requirement 没有可用 surface 时，agreement 与 warning 仍可查询，但不授予 client。V2 至少要求一个必需 surface；缺失的 `optionalSurfaces` 产生协商 warning，并从 client 中省略。缺失或未声明的 surface 不能注册。同一 activation、同一 surface 的 contribution ID 在两个版本间仍保持唯一；释放 lease 后可复用 ID。Facet 激活失败、卸载及 Host provider 撤销会关闭受影响的所有版本 client，并撤销注册。
 

@@ -70,7 +70,7 @@ flowchart TB
 
 ## UI 精确版本与 browser 安装契约
 
-`registerUiContributionProvider(provider, options)` 的 `options.apiVersions` 未提供时必须只发布 `ui.dsh/v1alpha1 ContributionHost`。显式列表必须非空，只包含 `ui.dsh/v1alpha1` 与 `ui.dsh/v1alpha2`，且不得重复。Adapter 必须按每个发布的精确坐标声明相同的实际 surface support，不得用 V1 support 满足 V2 requirement。
+`registerUiContributionProvider(provider, options)` 的 `options.apiVersions` 未提供时必须只发布 `ui.dsh/v1alpha1 ContributionHost`。显式列表必须非空，只包含 `ui.dsh/v1alpha1` 与 `ui.dsh/v1alpha2`，且不得重复。Adapter 必须按每个发布的精确坐标声明相同的实际 surface support，不得用 V1 support 满足 V2 requirement。Provider 撤销必须永久失效其旧 agreement，即使相同对象或 participant 再次注册也不得恢复；consumer 必须通过新的 activation 与新注册协商。
 
 每次 activation 必须按 consumer 声明的精确 ContributionHost 版本分别绑定 client。V2 client 只包含成功协商的 required 与 optional surfaces；缺失 optional surface 的 warning 不得阻止具备全部 required surfaces 的 facet 激活，缺失项不得进入注册授权。V1 client 不得复用 V2 的额外授权。Browser 对整体 optional 且没有 surface 授权的已协商协议必须保留可查询的 agreement 与 warning，但不得授予 client。多个版本共享同一 activation owner 时，同一 surface 与 contribution ID 不得重复注册；lease disposer 完成后可复用 ID。撤销 Host provider、激活失败与 facet 卸载必须释放受影响的全部版本绑定，即使某项 disposer 失败也必须继续清理其他绑定。
 

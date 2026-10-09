@@ -1030,7 +1030,10 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly skillExtensions: DshStandardSkillProvider | undefined
   private readonly disposeSkillProvider: (() => void) | undefined
   private readonly commandProviderDisposers = new Set<() => void>()
-  private readonly uiProviders = new Map<string, UiContributionProvider>()
+  private readonly uiProviders = new Map<string, {
+    readonly provider: UiContributionProvider
+    readonly instanceId: string
+  }>()
   private readonly uiBindings = new Map<string, Set<BoundContributionHost>>()
   private readonly uiProviderDisposers = new Set<() => Promise<void>>()
   private readonly browserModules = new Map<string, DshBrowserModuleRecord>()
@@ -1110,8 +1113,9 @@ export class DshStandardAdapter extends TypertRemoteService {
         const ui = new Map<string, BoundContributionHost>()
         const providersAtActivation = new Map(uiProviders)
         let closed = false
-        const scopedProviders = activationUiProviders([...providersAtActivation.values()],
-          provider => !closed && uiProviders.get(provider.participantId) === provider)
+        const scopedProviders = activationUiProviders([...providersAtActivation.values()].map(row => row.provider),
+          provider => !closed && providersAtActivation.has(provider.participantId)
+            && uiProviders.get(provider.participantId) === providersAtActivation.get(provider.participantId))
         return Object.freeze({
           client<T = unknown>(reference: ApiReference): T | undefined {
             if (reference.kind === UI_CONTRIBUTION_HOST_KIND
@@ -1125,8 +1129,8 @@ export class DshStandardAdapter extends TypertRemoteService {
               const selected = agreement.surfaces.filter(row => row.consumer === identity.participantId)
               if (selected.length === 0) return undefined
               const providers = [...new Set(selected.map(row => row.provider))].map(participantId => {
-                const provider = uiProviders.get(participantId)
-                if (provider === undefined || provider !== providersAtActivation.get(participantId)) {
+                const registration = uiProviders.get(participantId)
+                if (registration === undefined || registration !== providersAtActivation.get(participantId)) {
                   throw new Error(`negotiated UI provider ${JSON.stringify(participantId)} is unavailable`)
                 }
                 return scopedProviders.find(row => row.participantId === participantId)!
@@ -1273,13 +1277,14 @@ export class DshStandardAdapter extends TypertRemoteService {
       unregisterEndpoint()
       throw error
     }
-    this.uiProviders.set(provider.participantId, provider)
+    const registration = Object.freeze({ provider, instanceId })
+    this.uiProviders.set(provider.participantId, registration)
     let active = true
     const dispose = async (): Promise<void> => {
       if (!active) return
       active = false
       this.uiProviderDisposers.delete(dispose)
-      if (this.uiProviders.get(provider.participantId) === provider) this.uiProviders.delete(provider.participantId)
+      if (this.uiProviders.get(provider.participantId) === registration) this.uiProviders.delete(provider.participantId)
       unpublish()
       unregisterEndpoint()
       const bindings = [...(this.uiBindings.get(provider.participantId) ?? [])]
