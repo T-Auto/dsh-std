@@ -17,7 +17,9 @@ dsh plugin --profile web add <standard-component>
 
 ## How it runs
 
-This package is a DSH profile bundle activated by `cordis.patch.yml`. The adapter scans the active profile's dependencies for Community v0.15 `dsh-plugin.json`, validates component declarations, and loads facet entrypoints.
+This package is a DSH profile bundle activated by `cordis.patch.yml`. The adapter scans the active profile's dependencies for Community v0.15 `dsh-plugin.json`, checks the Host API, and validates and preflights static declarations before importing each host facet entrypoint. Unknown required contracts or required contracts without live support reject the facet without evaluating its module; missing optional contracts do not block loading. Merely installed providers are not live capabilities.
+
+After import, `mount()` repeats the checks against current live publications before activation. Preflight covers manifest-readable requirements, not requirements discoverable only by executing dynamic code, and does not replace runtime negotiation or rollback.
 
 `DshStandardAdapter` coordinates protocol negotiation and activation, supplies the APIs components need, and connects their published capabilities to product services. The host side requires the `sessionController` service.
 

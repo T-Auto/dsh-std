@@ -1294,6 +1294,7 @@ export class DshStandardAdapter extends TypertRemoteService {
             || facet.activation.kind !== FACET_MODULE_KIND) continue
           const spec = facetModuleActivationDefinition.validateSpec(facet.activation.spec)
           const resolved = resolveFacetModule(packageDir, spec.module)
+          this.preflightFacet(manifest, facet.name)
           const namespace = await import(pathToFileURL(resolved).href) as Record<string, unknown>
           const module = namespace.default ?? namespace.facet
           assertFacetModule(module, spec.module)
@@ -1328,15 +1329,15 @@ export class DshStandardAdapter extends TypertRemoteService {
     })
   }
 
-  /** Activate exactly one manifest facet through the standard lifecycle publication barrier. */
-  async mount(input: DshFacetPublication): Promise<() => Promise<void>> {
-    const manifest = defineComponentManifest(input.manifest)
-    const facet = findFacet(manifest, input.facet)
-    if (facet === undefined) throw new TypeError(`component has no facet ${JSON.stringify(input.facet)}`)
+  /** Check static declarations against the currently published providers without running facet code. */
+  private preflightFacet(manifestValue: ComponentManifest, facetName: string) {
+    const manifest = defineComponentManifest(manifestValue)
+    const facet = findFacet(manifest, facetName)
+    if (facet === undefined) throw new TypeError(`component has no facet ${JSON.stringify(facetName)}`)
     if (facet.activation === undefined
       || facet.activation.apiVersion !== DSH_ACTIVATION_API_VERSION
       || facet.activation.kind !== DSH_ACTIVATION_KIND) {
-      throw new TypeError(`facet ${JSON.stringify(input.facet)} is not activated by ${DSH_ACTIVATION_API_VERSION} ${DSH_ACTIVATION_KIND}`)
+      throw new TypeError(`facet ${JSON.stringify(facetName)} is not activated by ${DSH_ACTIVATION_API_VERSION} ${DSH_ACTIVATION_KIND}`)
     }
     const validation = this.manifestDefinitions.validate(manifest, this.protocols)
     if (!validation.compatible) throw new Error(validation.issues.filter(row => row.severity === 'error').map(row => row.message).join('; '))
@@ -1359,7 +1360,13 @@ export class DshStandardAdapter extends TypertRemoteService {
       select: [{ component: identity.component, facet: identity.facet, required: true }],
     }, this.compositionRules)
     if (!plan.compatible) throw new Error(`facet ${key} cannot be composed: ${plan.issues.filter(row => row.severity === 'error').map(row => row.message).join('; ')}`)
+    return { manifest, facet, key, plan }
+  }
 
+  /** Activate exactly one manifest facet through the standard lifecycle publication barrier. */
+  async mount(input: DshFacetPublication): Promise<() => Promise<void>> {
+    // Module evaluation can change live providers after discovery's preflight.
+    const { manifest, facet, key, plan } = this.preflightFacet(input.manifest, input.facet)
     this.pending.set(key, input)
     let handle: ActivationHandle
     try {
