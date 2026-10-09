@@ -48,11 +48,12 @@ Profile 是 composition 的环境选择，不是需要逐项注册的 UI resourc
 
 ## 协议坐标
 
-`v1alpha1` 定义以下基础能力：
+基础能力使用以下精确坐标；base envelope 的版本与具体 surface 的版本相互独立：
 
 | `apiVersion` | `kind` | 作用 |
 | --- | --- | --- |
-| `ui.dsh/v1alpha1` | `ContributionHost` | 为当前 activation scope 协商并签发 surface registration API |
+| `ui.dsh/v1alpha1` | `ContributionHost` | 为当前 activation scope 协商全部必需的 surfaces 并签发 registration API |
+| `ui.dsh/v1alpha2` | `ContributionHost` | 在同一 requirement 中区分必需 surfaces 与可选增强 surfaces |
 | `ui.dsh/v1alpha1` | `UiContribution` | 可选的静态、纯数据 contribution extension 外壳 |
 
 `ContributionHost` 不代表某个 shell 支持任意 UI。Requirement 与 support 必须列出具体 surface coordinates；未列出的 surface 不属于 agreement。
@@ -117,7 +118,27 @@ interface ContributionHostRequirementSpec {
 }
 ```
 
-同一 requirement 中的 surface 全部为必需。需要可选 surface 时，facet 必须使用 core 的 optional requirement 语义形成独立 requirement，不得在 surface descriptor 中使用无法参与 composition 的提示字段模拟 optional。
+`ui.dsh/v1alpha1` 的 `surfaces` 全部为必需。整条 `ContributionHost` requirement 可以使用 core 的 `optional` 标记，但同一 participant 不得为同一坐标重复声明 requirement；不得以两条同坐标 requirement 表达同一 facet 的必需与可选 surfaces。
+
+`ui.dsh/v1alpha2` 的 requirement 使用以下数据结构：
+
+```ts
+interface ContributionHostRequirementSpecV2 extends ContributionHostRequirementSpec {
+  readonly optionalSurfaces?: readonly UiSurfaceRequirement[]
+}
+```
+
+`surfaces` 必须为非空数组；`optionalSurfaces` 可省略或为空。只需要一组可选 surfaces 的 facet 应将整条 requirement 标为 `optional`。两个数组中的每个 surface coordinate 必须唯一，不得把同一 coordinate 的不同 mode 作为重复候选。
+
+协商必须逐项处理：
+
+- `surfaces` 中没有匹配 coordinate 和 mode 的 provider 时，必须报告 `ui-surface-unavailable` error；整条 requirement 标为 `optional` 时，该结果为 warning。
+- `optionalSurfaces` 中没有匹配 provider 时，必须报告 `ui-surface-unavailable` warning，不得因此拒绝其余已满足的 surfaces。
+- 未满足的 surface 不得进入 agreement，也不得通过 scoped facade 注册。
+- 存在多个匹配 provider 时，必须报告 `ui-placement-conflict` error，不得以 optional 标记掩盖歧义或以激活顺序选择 provider。
+- 非法 requirement、mode 或重复 coordinate 必须拒绝；optional 标记不得豁免 schema 校验。
+
+`optionalSurfaces` 不是 descriptor 字段，不得以运行时 UI 提示代替 composition 输入。新 requirement 必须使用 `ui.dsh/v1alpha2`；不得将该字段放入严格校验的 `v1alpha1` spec。
 
 Requirement 中的 `spec` 由 surface definition 校验。Base UI protocol 不解释 placement、renderer version、field kinds 或工具卡类型。
 
@@ -135,6 +156,8 @@ interface ContributionHostSupportSpec {
   readonly surfaces: readonly UiSurfaceSupport[]
 }
 ```
+
+`v1alpha1` 与 `v1alpha2` 使用相同的 support spec 形状，但 support 必须声明精确的 base coordinate。`v1alpha1` support 不满足 `v1alpha2` requirement；shell 只有确实实现两个版本时才可以分别发布两项 support。
 
 Shell 只能声明自己实际能够接纳、渲染并清理的 surface 和 mode。Profile 保证某个 shell 存在，不表示该 shell 自动支持所有 surfaces；support 必须来自当前 composition 中 active 的 surface owners。
 
@@ -337,7 +360,11 @@ Base UI envelope 与每个 surface protocol 独立版本化：
 - 未知 static `UiContribution` surface 不能被渲染为“最佳猜测”UI；
 - Profile 更换可以产生不同 UI facet plan，但不得改变未重新 composition 的 Host facet authority。
 
-Manifest schema、surface definition、adapter mapping 和 conformance claim 必须分别声明所支持的版本。声明支持 `ui.dsh/v1alpha1 ContributionHost` 不表示支持任意产品或 shell 定义的 surface protocols。
+Manifest schema、surface definition、adapter mapping 和 conformance claim 必须分别声明所支持的版本。声明支持任一 `ContributionHost` 版本不表示支持任意产品或 shell 定义的 surface protocols。
+
+`v1alpha1` 的严格 requirement validator、全部必需语义、默认 helper 坐标和静态 `UiContribution` extension 坐标必须保持不变。`v1alpha2` 不改变具体 surface 的 descriptor、mode、ABI 或清理语义；不得因 support spec 形状相同而推断跨版本兼容。
+
+声明必须通过能够保留 protocol-owned requirement `spec` 的 facet 或 namespaced extension 进入 composition。Community Manifest 0.15 的根级 `requires.contracts` 不接受 `spec`，其保留的 `contributes.panels` 不能作为此版本的安装声明。可选 surface 协商不授予新的 facet activation、加载能力或领域权限。
 
 ## 与其他协议的关系
 
