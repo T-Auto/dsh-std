@@ -38,6 +38,36 @@ Tools execute locally in DSH, using the product's model, attachment, filesystem 
 
 The browser half reads `LocalModule` declarations, serves package-local artifacts, and connects them to native UI slots. UI registrations are removed when their facet stops. The DSH Plugins page displays standard components and their runtime state.
 
+## UI ContributionHost versions
+
+Host integrations call `registerUiContributionProvider(provider)` to advertise only `ui.dsh/v1alpha1`, preserving the existing default. To opt in, pass `{ apiVersions: ['ui.dsh/v1alpha2'] }` or `{ apiVersions: ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] }` as the second argument. Empty lists, unknown versions, and duplicate versions are rejected. Support describes the provider's actual surfaces; V1 support does not satisfy a V2 requirement.
+
+The independent browser runtime advertises both exact ContributionHost versions for its SettingsSection and ToolCallView surfaces. For each declared version with granted surfaces, a facet receives a separate client containing only that version's negotiated grants. A wholly optional requirement with no available surfaces retains its queryable agreement and warnings but grants no client. V2 requires at least one required surface; unavailable `optionalSurfaces` produce negotiation warnings and are omitted from the client. Omitted or undeclared surfaces cannot be registered. A contribution ID remains unique within an activation and surface even when both versions are used; disposing its lease releases the ID. Facet failure/unload and Host provider withdrawal close the affected clients and retract their registrations, including all version facades.
+
+Community v0.15 browser facets use the existing namespaced `contributes['x-dev.dsh-std.extensions']` lane, not root-level `requires` or `panels`:
+
+```json
+{
+  "id": "example.settings.browser",
+  "apiVersion": "browser.ui.dsh/v1alpha1",
+  "kind": "LocalModule",
+  "name": "browser",
+  "spec": {
+    "module": "dist/client.js",
+    "requirements": [{
+      "apiVersion": "ui.dsh/v1alpha2",
+      "kind": "ContributionHost",
+      "spec": {
+        "surfaces": [{ "apiVersion": "browser.ui.dsh/v1alpha1", "kind": "SettingsSection", "mode": "local-module" }],
+        "optionalSurfaces": [{ "apiVersion": "browser.ui.dsh/v1alpha1", "kind": "ToolCallView", "mode": "local-module" }]
+      }
+    }]
+  }
+}
+```
+
+Discovery preserves these browser-only requirements through manifest projection and module transport. The module uses `context.protocols.client({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })` and checks the returned client's surfaces before registering an optional view. The LocalModule ABI itself remains `browser.ui.dsh/v1alpha1`; this does not introduce a TUI module ABI or grant unrelated domain APIs.
+
 ## Publication and cleanup
 
 During activation, components register protocol implementations with `context.protocols.implement()` and extension handlers with `context.extensions.publish()`. Capabilities become callable after activation, validation, and negotiation succeed.

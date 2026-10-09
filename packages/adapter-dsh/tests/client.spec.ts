@@ -4,6 +4,7 @@ import { defineComponentManifest } from '@dsh-std/manifest'
 import { defineFacet } from '@dsh-std/sdk'
 import {
   contributionHostRequirement,
+  contributionHostRequirementV2,
   type ContributionHostClient,
 } from '@dsh-std/ui'
 import {
@@ -92,6 +93,150 @@ describe('DSH browser UI adapter', () => {
     ])
     await dispose()
     expect(entries).toEqual([])
+  })
+
+  it.each(['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'])('preserves empty optional %s agreements without granting a client', async apiVersion => {
+    const ctx = new Context()
+    ctx.provide('slots', {
+      inject() { throw new Error('an unavailable surface must not register') },
+      register() { throw new Error('an unavailable surface must not register') },
+    } as never)
+    const runtime = new DshBrowserUiRuntime(ctx)
+    const spec = { surfaces: [{ apiVersion: 'example.ui/v1', kind: 'Missing', mode: 'local-module' as const }] }
+    const requirement = apiVersion === 'ui.dsh/v1alpha1'
+      ? contributionHostRequirement(spec, true) : contributionHostRequirementV2(spec, true)
+    const manifest = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.optional-ui', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'browser',
+        activation: { apiVersion: BROWSER_CLIENT_ACTIVATION_API_VERSION, kind: BROWSER_CLIENT_ACTIVATION_KIND, spec: { module: 'client.js' } },
+        protocols: { requires: [requirement] },
+      }] },
+    })
+    const dispose = await runtime.mountFacet({ manifest, facet: 'browser', module: defineFacet(activation => {
+      const reference = { apiVersion, kind: 'ContributionHost' }
+      const negotiated = activation.protocols.agreement(reference)
+      expect(negotiated?.agreement).toEqual({ surfaces: [] })
+      expect(negotiated?.issues).toEqual(expect.arrayContaining([expect.objectContaining({
+        code: 'ui-surface-unavailable', severity: 'warning',
+      })]))
+      expect(activation.protocols.client(reference)).toBeUndefined()
+      expect(activation.protocols.agreement({
+        apiVersion: apiVersion === 'ui.dsh/v1alpha1' ? 'ui.dsh/v1alpha2' : 'ui.dsh/v1alpha1', kind: 'ContributionHost',
+      })).toBeUndefined()
+    }) })
+    await dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it.each(['v1-first', 'v2-first'])('keeps dual-version browser grants and IDs isolated (%s)', async order => {
+    const entries: Record<string, unknown>[] = []
+    const ctx = new Context()
+    ctx.provide('slots', {
+      inject(_name: string, setup: () => () => void) { return setup() },
+      register(options: Record<string, unknown>) {
+        entries.push(options)
+        return () => { entries.splice(entries.indexOf(options), 1) }
+      },
+    } as never)
+    const runtime = new DshBrowserUiRuntime(ctx)
+    let v1: ContributionHostClient | undefined
+    let v2: ContributionHostClient | undefined
+    let disposed = 0
+    const settings = {
+      descriptor: { id: 'account', surface: BROWSER_SETTINGS_SECTION, content: { label: 'Account' } },
+      localModule: { component: () => null, dispose() { disposed++ } },
+    }
+    const tool = {
+      descriptor: { id: 'tool', surface: BROWSER_TOOL_CALL_VIEW, content: { tool: 'example' } },
+      localModule: { component: () => null, dispose() { disposed++ } },
+    }
+    const manifest = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.browser-versions', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'browser',
+        activation: { apiVersion: BROWSER_CLIENT_ACTIVATION_API_VERSION, kind: BROWSER_CLIENT_ACTIVATION_KIND, spec: { module: 'client.js' } },
+        protocols: { requires: [
+          contributionHostRequirement({ surfaces: [browserSettingsSectionRequirement()] }),
+          contributionHostRequirementV2({ surfaces: [browserSettingsSectionRequirement()], optionalSurfaces: [browserToolCallViewRequirement()] }),
+        ] },
+      }] },
+    })
+    const dispose = await runtime.mountFacet({ manifest, facet: 'browser', module: defineFacet(async activation => {
+      const client = (apiVersion: string) => activation.protocols.client<ContributionHostClient>({ apiVersion, kind: 'ContributionHost' })
+      if (order === 'v1-first') { v1 = client('ui.dsh/v1alpha1'); v2 = client('ui.dsh/v1alpha2') }
+      else { v2 = client('ui.dsh/v1alpha2'); v1 = client('ui.dsh/v1alpha1') }
+      expect(v1).not.toBe(v2)
+      expect(v1!.surfaces.map(row => row.kind)).toEqual(['SettingsSection'])
+      expect(v2!.surfaces.map(row => row.kind)).toEqual(['SettingsSection', 'ToolCallView'])
+      expect(activation.protocols.agreement({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })?.apiVersion).toBe('ui.dsh/v1alpha2')
+      expect(() => v1!.register(tool)).toThrow(/not negotiated/)
+      const lease = v1!.register(settings)
+      expect(() => v2!.register(settings)).toThrow(/duplicate/)
+      await lease.dispose()
+      v2!.register(settings)
+      v2!.register(tool)
+      v1!.register({ ...settings, descriptor: { ...settings.descriptor, id: 'other' } })
+    }) })
+    expect(entries).toHaveLength(3)
+    await dispose()
+    await dispose()
+    expect(entries).toEqual([])
+    expect(disposed).toBe(4)
+    expect(() => v1!.register(settings)).toThrow(/closed/)
+    expect(() => v2!.register(settings)).toThrow(/closed/)
+    await ctx.fiber.dispose()
+  })
+
+  it.each(['unload', 'activation-failure'])('drains both version facades even when a view cleanup fails (%s)', async mode => {
+    const entries: string[] = []
+    const ctx = new Context()
+    ctx.provide('slots', {
+      inject(_name: string, setup: () => () => void) { return setup() },
+      register(options: Record<string, unknown>) {
+        const id = String(options.id ?? options.key)
+        entries.push(id)
+        return () => { entries.splice(entries.indexOf(id), 1) }
+      },
+    } as never)
+    const runtime = new DshBrowserUiRuntime(ctx)
+    const manifest = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.browser-cleanup', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'browser',
+        activation: { apiVersion: BROWSER_CLIENT_ACTIVATION_API_VERSION, kind: BROWSER_CLIENT_ACTIVATION_KIND, spec: { module: 'client.js' } },
+        protocols: { requires: [
+          contributionHostRequirement({ surfaces: [browserSettingsSectionRequirement()] }),
+          contributionHostRequirementV2({ surfaces: [browserToolCallViewRequirement()] }),
+        ] },
+      }] },
+    })
+    let v1: ContributionHostClient | undefined
+    const mounting = runtime.mountFacet({ manifest, facet: 'browser', module: defineFacet(activation => {
+      v1 = activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })
+      activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })!.register({
+        descriptor: { id: 'settings', surface: BROWSER_SETTINGS_SECTION, content: { label: 'Settings' } },
+        localModule: { component: () => null },
+      })
+      activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })!.register({
+        descriptor: { id: 'tool', surface: BROWSER_TOOL_CALL_VIEW, content: { tool: 'tool' } },
+        localModule: { component: () => null, dispose() {
+          expect(() => v1!.register({
+            descriptor: { id: 'reentrant', surface: BROWSER_SETTINGS_SECTION, content: { label: 'Late' } },
+            localModule: { component: () => null },
+          })).toThrow(/closed/)
+          throw new Error('view cleanup failed')
+        } },
+      })
+      if (mode === 'activation-failure') throw new Error('activation failed')
+    }) })
+    if (mode === 'activation-failure') await expect(mounting).rejects.toThrow(/failed to close/)
+    else await expect((await mounting)()).rejects.toThrow(/failed to close/)
+    expect(entries).toEqual([])
+    await ctx.fiber.dispose()
   })
 
   it('resolves optional locale, command and attachment services only for a requesting contribution', async () => {

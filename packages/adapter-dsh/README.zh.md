@@ -38,6 +38,36 @@ dsh plugin --profile web add <standard-component>
 
 浏览器部分读取 `LocalModule` 声明，提供包内模块产物并接入原生 UI slot。UI 注册随所属 facet 停用而撤销。DSH 的“插件”页显示标准组件及其运行状态。
 
+## UI ContributionHost 版本
+
+Host 集成调用 `registerUiContributionProvider(provider)` 时默认只声明 `ui.dsh/v1alpha1`，保持已有行为。显式启用时，第二个参数传入 `{ apiVersions: ['ui.dsh/v1alpha2'] }` 或 `{ apiVersions: ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] }`。空列表、未知版本与重复版本会被拒绝。Support 描述 provider 实际提供的 surfaces；V1 support 不满足 V2 requirement。
+
+独立 browser runtime 为 SettingsSection 与 ToolCallView surfaces 实际声明两个精确 ContributionHost 版本。Facet 按其声明且实际获得 surface 授权的版本分别取得 client，每个 client 只含该版本的已协商授权。整体 optional requirement 没有可用 surface 时，agreement 与 warning 仍可查询，但不授予 client。V2 至少要求一个必需 surface；缺失的 `optionalSurfaces` 产生协商 warning，并从 client 中省略。缺失或未声明的 surface 不能注册。同一 activation、同一 surface 的 contribution ID 在两个版本间仍保持唯一；释放 lease 后可复用 ID。Facet 激活失败、卸载及 Host provider 撤销会关闭受影响的所有版本 client，并撤销注册。
+
+Community v0.15 browser facet 使用已有的 namespaced `contributes['x-dev.dsh-std.extensions']` lane，不改变根级 `requires` 或 `panels`：
+
+```json
+{
+  "id": "example.settings.browser",
+  "apiVersion": "browser.ui.dsh/v1alpha1",
+  "kind": "LocalModule",
+  "name": "browser",
+  "spec": {
+    "module": "dist/client.js",
+    "requirements": [{
+      "apiVersion": "ui.dsh/v1alpha2",
+      "kind": "ContributionHost",
+      "spec": {
+        "surfaces": [{ "apiVersion": "browser.ui.dsh/v1alpha1", "kind": "SettingsSection", "mode": "local-module" }],
+        "optionalSurfaces": [{ "apiVersion": "browser.ui.dsh/v1alpha1", "kind": "ToolCallView", "mode": "local-module" }]
+      }
+    }]
+  }
+}
+```
+
+发现流程经 manifest 投影与 module transport 保留这些 browser 独立 requirements。Module 通过 `context.protocols.client({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })` 取得 client，并在注册可选 view 前检查 client 的 surfaces。LocalModule ABI 自身仍为 `browser.ui.dsh/v1alpha1`；这不引入 TUI module ABI，也不授予其他领域 API。
+
 ## 发布与清理
 
 组件在激活期间通过 `context.protocols.implement()` 登记协议实现，通过 `context.extensions.publish()` 登记扩展处理函数。激活、校验和协商成功后，这些能力进入可调用状态。

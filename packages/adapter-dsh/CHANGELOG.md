@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added opt-in exact `ui.dsh/v1alpha2` Host provider support while retaining the V1 default, with version-isolated activation clients, owner-local contribution IDs, and full provider/facet cleanup.
+- Published both exact ContributionHost versions in the independent browser runtime and preserved V2 optional-surface requirements through the Community v0.15 LocalModule installation bridge, with authorization and unload regressions.
 - Adapted lifecycle activation identities to carry a required generation while projecting UI contribution owners through the existing UI owner schema.
 
 ## 0.1.1-rc.4

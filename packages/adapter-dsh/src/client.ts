@@ -26,12 +26,14 @@ import type {
 import type { FacetModule } from '@dsh-std/sdk'
 import {
   API_VERSION as UI_API_VERSION,
+  API_VERSION_V2 as UI_API_VERSION_V2,
+  type BoundContributionHost,
   CONTRIBUTION_HOST_KIND,
   bindContributionHosts,
   contributionHostSupport,
+  contributionHostSupportV2,
   register as registerUi,
   validateContributionHostAgreement,
-  type ContributionHostClient,
   type UiContributionProvider,
   type UiContributionRegistration,
 } from '@dsh-std/ui'
@@ -56,6 +58,7 @@ import {
   type BrowserUiViewBinding,
 } from '@dsh-std/ui-browser'
 import { ADAPTER_VERSION } from './version.js'
+import { activationUiProviders } from './ui-providers.js'
 import { strictCodec } from './strict-codec.js'
 
 export const BROWSER_UI_API_VERSION = BROWSER_UI_PROTOCOL_VERSION
@@ -240,7 +243,8 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
 
     const requirements = facet.protocols?.requires ?? []
     for (const requirement of requirements) {
-      if (!sameProtocol(requirement, { apiVersion: UI_API_VERSION, kind: CONTRIBUTION_HOST_KIND })) {
+      if (requirement.kind !== CONTRIBUTION_HOST_KIND
+        || (requirement.apiVersion !== UI_API_VERSION && requirement.apiVersion !== UI_API_VERSION_V2)) {
         throw new Error(`DSH browser UI adapter cannot provide ${requirement.apiVersion} ${requirement.kind}`)
       }
     }
@@ -248,7 +252,7 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
     registerUi(protocols)
     const providerDeclarations = this.providers.map(provider => defineProtocolDeclaration({
         participant: { id: provider.participantId },
-        supports: [contributionHostSupport(provider.support)],
+        supports: [contributionHostSupport(provider.support), contributionHostSupportV2(provider.support)],
       }))
     const plan = compose({
       manifests: [manifest],
@@ -281,35 +285,42 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
     if (!report.compatible) {
       throw new Error(report.issues.filter(issue => issue.severity === 'error').map(issue => issue.message).join('; '))
     }
-    const negotiated = report.protocols.find(row => sameProtocol(row, {
-      apiVersion: UI_API_VERSION,
-      kind: CONTRIBUTION_HOST_KIND,
-    }))
-    if (negotiated?.agreement === undefined) throw new Error('Browser UI facet did not negotiate ContributionHost')
-    const host = bindContributionHosts(
-      validateContributionHostAgreement(negotiated.agreement),
-      {
-        component: identity.component,
-        version: identity.version,
-        facet: identity.facet,
-        instanceId: identity.instanceId,
-        participantId: identity.participantId,
-      },
-      this.providers,
-    )
+    let closed = false
+    const providers = activationUiProviders(this.providers, () => !closed)
+    const bindings = report.protocols
+      .filter(negotiated => requirements.some(requirement => sameProtocol(requirement, negotiated)))
+      .map(negotiated => {
+        const agreement = negotiated.agreement === undefined ? undefined : validateContributionHostAgreement(negotiated.agreement)
+        const host = agreement?.surfaces.some(row => row.consumer === identity.participantId)
+          ? bindContributionHosts(agreement, {
+            component: identity.component,
+            version: identity.version,
+            facet: identity.facet,
+            instanceId: identity.instanceId,
+            participantId: identity.participantId,
+          }, providers) : undefined
+        return { negotiated, host }
+      })
+    const closeHosts = async (reason?: string): Promise<void> => {
+      closed = true
+      // Drain all version facades even if a view disposer rejects.
+      const results = await Promise.allSettled([...bindings].reverse().map(({ host }) => host?.close(reason)))
+      const errors: unknown[] = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (errors.length > 0) throw new AggregateError(errors, 'one or more Browser UI hosts failed to close')
+    }
     const scope = new BrowserCleanupScope()
-    const context = activationContext(identity, plan, scope, negotiated, host.client)
+    const context = activationContext(identity, plan, scope, bindings)
     try {
       await input.module.activate(context)
     } catch (error) {
-      await closeFacet(input.module, scope, host.close, 'Browser UI facet activation failed')
+      await closeFacet(input.module, scope, closeHosts, 'Browser UI facet activation failed')
       throw error
     }
     let active = true
     return async () => {
       if (!active) return
       active = false
-      await closeFacet(input.module, scope, host.close, 'Browser UI facet unmounted')
+      await closeFacet(input.module, scope, closeHosts, 'Browser UI facet unmounted')
     }
   }
 }
@@ -664,8 +675,7 @@ function activationContext(
   identity: ActivationInstanceIdentity,
   plan: CompositionPlan,
   scope: BrowserCleanupScope,
-  negotiated: NegotiatedProtocol,
-  ui: ContributionHostClient,
+  bindings: readonly { readonly negotiated: NegotiatedProtocol; readonly host: BoundContributionHost | undefined }[],
 ): ActivationContext {
   return Object.freeze({
     identity,
@@ -673,10 +683,10 @@ function activationContext(
     scope,
     protocols: Object.freeze({
       agreement(reference: ApiReference): NegotiatedProtocol | undefined {
-        return sameProtocol(reference, negotiated) ? negotiated : undefined
+        return bindings.find(row => sameProtocol(reference, row.negotiated))?.negotiated
       },
       client<T = unknown>(reference: ApiReference): T | undefined {
-        return sameProtocol(reference, negotiated) ? ui as unknown as T : undefined
+        return bindings.find(row => sameProtocol(reference, row.negotiated))?.host?.client as T | undefined
       },
       implement(): () => void {
         throw new Error('Browser UI facets cannot publish protocol implementations')

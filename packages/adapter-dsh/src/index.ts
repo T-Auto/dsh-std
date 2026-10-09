@@ -146,9 +146,12 @@ import {
 } from '@dsh-std/workspace'
 import {
   API_VERSION as UI_API_VERSION,
+  API_VERSION_V2 as UI_API_VERSION_V2,
+  type ContributionHostApiVersion,
   CONTRIBUTION_HOST_KIND as UI_CONTRIBUTION_HOST_KIND,
   bindContributionHosts,
   contributionHostSupport,
+  contributionHostSupportV2,
   register as registerUi,
   registerManifest as registerUiManifest,
   validateContributionHostAgreement,
@@ -164,6 +167,7 @@ import {
   registerManifest as registerBrowserUiManifest,
 } from '@dsh-std/ui-browser'
 import { ADAPTER_VERSION } from './version.js'
+import { activationUiProviders } from './ui-providers.js'
 import {
   installDshStandardSkillProvider,
   type DshStandardSkillProvider,
@@ -1103,11 +1107,18 @@ export class DshStandardAdapter extends TypertRemoteService {
         const capability = pair.left.client(identity.participantId)
         const uiProviders = this.uiProviders
         const uiBindings = this.uiBindings
-        let ui: BoundContributionHost | undefined
+        const ui = new Map<string, BoundContributionHost>()
+        const providersAtActivation = new Map(uiProviders)
+        let closed = false
+        const scopedProviders = activationUiProviders([...providersAtActivation.values()],
+          provider => !closed && uiProviders.get(provider.participantId) === provider)
         return Object.freeze({
           client<T = unknown>(reference: ApiReference): T | undefined {
-            if (sameProtocol(reference, { apiVersion: UI_API_VERSION, kind: UI_CONTRIBUTION_HOST_KIND })) {
-              if (ui !== undefined) return ui.client as unknown as T
+            if (reference.kind === UI_CONTRIBUTION_HOST_KIND
+              && (reference.apiVersion === UI_API_VERSION || reference.apiVersion === UI_API_VERSION_V2)) {
+              const cached = ui.get(reference.apiVersion)
+              if (cached !== undefined) return cached.client as unknown as T
+              if (closed) return undefined
               const negotiated = agreements.find(row => sameProtocol(row, reference))
               if (negotiated?.agreement === undefined) return undefined
               const agreement = validateContributionHostAgreement(negotiated.agreement)
@@ -1115,33 +1126,41 @@ export class DshStandardAdapter extends TypertRemoteService {
               if (selected.length === 0) return undefined
               const providers = [...new Set(selected.map(row => row.provider))].map(participantId => {
                 const provider = uiProviders.get(participantId)
-                if (provider === undefined) throw new Error(`negotiated UI provider ${JSON.stringify(participantId)} is unavailable`)
-                return provider
+                if (provider === undefined || provider !== providersAtActivation.get(participantId)) {
+                  throw new Error(`negotiated UI provider ${JSON.stringify(participantId)} is unavailable`)
+                }
+                return scopedProviders.find(row => row.participantId === participantId)!
               })
-              ui = bindContributionHosts(agreement, {
+              const binding = bindContributionHosts(agreement, {
                 component: identity.component,
                 version: identity.version,
                 facet: identity.facet,
                 instanceId: identity.instanceId,
                 participantId: identity.participantId,
               }, providers)
+              ui.set(reference.apiVersion, binding)
               for (const provider of providers) {
                 const bindings = uiBindings.get(provider.participantId) ?? new Set<BoundContributionHost>()
-                bindings.add(ui)
+                bindings.add(binding)
                 uiBindings.set(provider.participantId, bindings)
               }
-              return ui.client as unknown as T
+              return binding.client as unknown as T
             }
             return capability.binding(reference) === undefined ? undefined : capability as unknown as T
           },
           close: async (reason?: string) => {
-            let failure: unknown
-            try { await ui?.close(reason) } catch (error) { failure = error }
-            if (ui !== undefined) {
-              for (const bindings of uiBindings.values()) bindings.delete(ui)
+            closed = true
+            // Drain every facade even if a provider disposer rejects.
+            const results = await Promise.allSettled([...ui.values()].reverse().map(binding => binding.close(reason)))
+            const errors: unknown[] = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+            for (const binding of ui.values()) {
+              for (const [participantId, bindings] of uiBindings) {
+                bindings.delete(binding)
+                if (bindings.size === 0) uiBindings.delete(participantId)
+              }
             }
             pair.close(reason)
-            if (failure !== undefined) throw failure
+            if (errors.length > 0) throw new AggregateError(errors, 'one or more UI bindings failed to close')
           },
         })
       },
@@ -1213,15 +1232,25 @@ export class DshStandardAdapter extends TypertRemoteService {
   }
 
   /** Publish a product-owned, same-process UI surface host to later facet activations. */
-  registerUiContributionProvider(provider: UiContributionProvider): () => Promise<void> {
+  registerUiContributionProvider(
+    provider: UiContributionProvider,
+    options: { readonly apiVersions?: readonly ContributionHostApiVersion[] } = {},
+  ): () => Promise<void> {
     nonEmpty(provider.participantId, 'UI contribution provider participantId')
     if (this.uiProviders.has(provider.participantId)) {
       throw new Error(`UI contribution provider ${JSON.stringify(provider.participantId)} is already registered`)
     }
-    const support = contributionHostSupport(validateContributionHostSupport(provider.support))
+    const apiVersions = options.apiVersions === undefined ? [UI_API_VERSION] : options.apiVersions
+    if (!Array.isArray(apiVersions) || apiVersions.length === 0
+      || apiVersions.some(version => version !== UI_API_VERSION && version !== UI_API_VERSION_V2)
+      || new Set(apiVersions).size !== apiVersions.length) {
+      throw new TypeError('UI contribution provider apiVersions must be a non-empty, distinct list of supported exact versions')
+    }
+    const spec = validateContributionHostSupport(provider.support)
     const declaration = defineProtocolDeclaration({
       participant: { id: provider.participantId },
-      supports: [support],
+      supports: apiVersions.map(version => version === UI_API_VERSION
+        ? contributionHostSupport(spec) : contributionHostSupportV2(spec)),
     })
     const instanceId = `${this.runtime.instanceId}:ui:${randomUUID()}`
     const unregisterEndpoint = this.connectionEndpoint.register({ declaration })
@@ -1255,9 +1284,13 @@ export class DshStandardAdapter extends TypertRemoteService {
       unregisterEndpoint()
       const bindings = [...(this.uiBindings.get(provider.participantId) ?? [])]
       this.uiBindings.delete(provider.participantId)
-      const errors: unknown[] = []
-      for (const binding of bindings.reverse()) {
-        try { await binding.close('UI contribution provider unregistered') } catch (error) { errors.push(error) }
+      const results = await Promise.allSettled(bindings.reverse().map(binding => binding.close('UI contribution provider unregistered')))
+      const errors: unknown[] = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      for (const binding of bindings) {
+        for (const [participantId, remaining] of this.uiBindings) {
+          remaining.delete(binding)
+          if (remaining.size === 0) this.uiBindings.delete(participantId)
+        }
       }
       if (errors.length > 0) throw new AggregateError(errors, 'one or more UI bindings failed to close')
     }
