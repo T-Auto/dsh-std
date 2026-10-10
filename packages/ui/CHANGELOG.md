@@ -5,6 +5,9 @@ Changes to `@dsh-std/ui` are recorded here.
 ## Unreleased
 
 - Updated core utility imports to the grouped public entry points.
+- Added explicit `ui.dsh/v1alpha2` ContributionHost requirements and support helpers for mixed required and optional surfaces.
+- Preserved strict `v1alpha1` validation and default helper coordinates; omitted unavailable optional surfaces from agreements without guessing between providers.
+- Registered both exact protocol definitions with rollback on partial registration failure.
 
 ## 0.1.1-rc.1
 
