@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Updated core utility imports to the grouped public entry points.
 - Preflighted manifest-readable host facet requirements before importing profile component entrypoints, so missing or unknown required contracts reject without executing module top-level code. Missing optional contracts still load, and activation rechecks live publications after import.
 - Adapted lifecycle activation identities to carry a required generation while projecting UI contribution owners through the existing UI owner schema.
 

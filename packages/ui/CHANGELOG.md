@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/ui` are recorded here.
 
+## Unreleased
+
+- Updated core utility imports to the grouped public entry points.
+
 ## 0.1.1-rc.1
 
 - Aligned the package with the workspace `0.1.1` prerelease line without changing the existing UI protocol semantics.

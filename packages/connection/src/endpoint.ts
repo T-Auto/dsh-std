@@ -1,9 +1,5 @@
-import {
-  defineProtocolDeclaration,
-  sameProtocol,
-  type ProtocolDeclaration,
-  type ProtocolSupport,
-} from '@dsh-std/core'
+import { defineProtocolDeclaration, type ProtocolDeclaration, type ProtocolSupport } from '@dsh-std/core'
+import { sameProtocol } from '@dsh-std/core/identity'
 import {
   CapabilityFailure,
   ConnectionInvocationError,

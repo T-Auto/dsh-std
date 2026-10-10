@@ -18,15 +18,8 @@ import type {
 import type {} from '@deepseek-ai/dsh-agent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import {
-  ProtocolCatalog,
-  defineProtocolDeclaration,
-  sameProtocol,
-  validateApiReference,
-  type ApiReference,
-  type ProtocolRequirement,
-  type ProtocolSupport,
-} from '@dsh-std/core'
+import { ProtocolCatalog, defineProtocolDeclaration, type ApiReference, type ProtocolRequirement, type ProtocolSupport } from '@dsh-std/core'
+import { sameProtocol, validateApiReference } from '@dsh-std/core/identity'
 import {
   ManifestDefinitionCatalog,
   defineComponentManifest,

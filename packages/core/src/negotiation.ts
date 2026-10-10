@@ -1,27 +1,10 @@
+import { protocolKey, validateApiReference, type ApiReference } from './identity.js'
 import {
-  protocolKey,
-  validateApiReference,
   validateProtocolDeclaration,
-  type ApiReference,
   type ProtocolDeclaration,
   type ProtocolRequirement,
   type ProtocolSupport,
 } from './protocol.js'
-
-export interface EvaluatorIdentity {
-  readonly name: string
-  readonly version: string
-}
-
-export interface ProtocolRequirementEntry<Spec = unknown> {
-  readonly participant: string
-  readonly requirement: ProtocolRequirement<Spec>
-}
-
-export interface ProtocolSupportEntry<Spec = unknown> {
-  readonly participant: string
-  readonly support: ProtocolSupport<Spec>
-}
 
 export interface ProtocolIssue {
   readonly code: string
@@ -32,8 +15,8 @@ export interface ProtocolIssue {
 }
 
 export interface ProtocolNegotiationInput<RequirementSpec = unknown, SupportSpec = unknown, Policy = unknown> {
-  readonly requirements: readonly ProtocolRequirementEntry<RequirementSpec>[]
-  readonly supports: readonly ProtocolSupportEntry<SupportSpec>[]
+  readonly requirements: readonly { readonly participant: string; readonly requirement: ProtocolRequirement<RequirementSpec> }[]
+  readonly supports: readonly { readonly participant: string; readonly support: ProtocolSupport<SupportSpec> }[]
   readonly policy?: Policy
 }
 
@@ -42,20 +25,17 @@ export interface ProtocolNegotiationOutcome<Agreement = unknown> {
   readonly issues?: readonly ProtocolIssue[]
 }
 
-/** Exact protocol coordinate whose definition-owned spec is being validated. */
-export interface ProtocolValidationContext extends ApiReference {}
-
 export interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, Agreement = unknown, Policy = unknown>
   extends ApiReference {
   /** Every accepted wire/static API version. No compatibility is inferred by core. */
   readonly accepts?: readonly string[]
-  validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
-  validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
+  validateRequirement(spec: unknown, context: ApiReference): RequirementSpec
+  validateSupport(spec: unknown, context: ApiReference): SupportSpec
   /**
    * Normalize and validate the definition-owned agreement before publication.
    * Optional for definitions written against the original v1alpha1 API.
    */
-  readonly validateAgreement?: (agreement: unknown, context: ProtocolValidationContext) => Agreement
+  readonly validateAgreement?: (agreement: unknown, context: ApiReference) => Agreement
   negotiate(
     input: ProtocolNegotiationInput<RequirementSpec, SupportSpec, Policy>,
   ): ProtocolNegotiationOutcome<Agreement>
@@ -69,7 +49,7 @@ export interface NegotiatedProtocol<Agreement = unknown> extends ApiReference {
 
 export interface NegotiationReport {
   readonly apiVersion: 'core.dsh/report/v1alpha1'
-  readonly evaluator: EvaluatorIdentity
+  readonly evaluator: { readonly name: string; readonly version: string }
   readonly compatible: boolean
   readonly protocols: readonly NegotiatedProtocol[]
   readonly issues: readonly ProtocolIssue[]
@@ -83,7 +63,7 @@ interface StoredDefinition {
 export class ProtocolCatalog {
   private readonly definitions = new Map<string, StoredDefinition>()
 
-  constructor(readonly evaluator: EvaluatorIdentity) {
+  constructor(readonly evaluator: NegotiationReport['evaluator']) {
     nonEmpty(evaluator.name, 'evaluator.name')
     nonEmpty(evaluator.version, 'evaluator.version')
   }
@@ -107,10 +87,6 @@ export class ProtocolCatalog {
     }
   }
 
-  list(): readonly ProtocolDefinition[] {
-    return Object.freeze([...new Set([...this.definitions.values()].map(row => row.definition))])
-  }
-
   resolve(reference: ApiReference): ProtocolDefinition | undefined {
     validateApiReference(reference)
     return this.definitions.get(protocolKey(reference))?.definition
@@ -131,8 +107,8 @@ export class ProtocolCatalog {
     }
 
     const groups = new Map<StoredDefinition, {
-      requirements: ProtocolRequirementEntry[]
-      supports: ProtocolSupportEntry[]
+      requirements: ProtocolNegotiationInput['requirements'][number][]
+      supports: ProtocolNegotiationInput['supports'][number][]
     }>()
     const issues: ProtocolIssue[] = []
     for (const [declarationIndex, declaration] of declarations.entries()) {
@@ -260,7 +236,7 @@ function freezeDefinition(definition: ProtocolDefinition): ProtocolDefinition {
   return Object.freeze({ ...definition, ...(definition.accepts === undefined ? {} : { accepts: Object.freeze([...definition.accepts]) }) })
 }
 
-function validationContext(reference: ApiReference): ProtocolValidationContext {
+function validationContext(reference: ApiReference): ApiReference {
   return Object.freeze({ apiVersion: reference.apiVersion, kind: reference.kind })
 }
 
