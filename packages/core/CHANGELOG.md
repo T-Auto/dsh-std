@@ -4,6 +4,9 @@ Changes to `@dsh-std/core` are recorded here.
 
 ## Unreleased
 
+- Grouped the public API into declaration/negotiation, identity, JSON, and component-version entry points; preserved the TUI-used catalog and declaration interfaces.
+- Inlined redundant identity, negotiation-row, and validation-context types; removed the unused API-version parser, family key, and catalog listing method.
+
 - Made negotiated protocol report ordering independent of locale-specific collation.
 
 ## 0.1.1-rc.2

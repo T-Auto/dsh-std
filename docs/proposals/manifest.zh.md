@@ -1,197 +1,114 @@
-# `@dsh-std/manifest` 设计提案
+# `@dsh-std/manifest` 组件设计
 
 - 文档类型：设计提案
 - 状态：方向已确认，格式草案
-- 日期：2026-08-20
+- 设计版本：v2
+- 日期：2026-10-10
+- 初版：v1（2026-08-20）
 
-## Summary
+## 职责
 
-`@dsh-std/manifest` 定义插件包根目录中的静态 `dsh-plugin.json`。Manifest 在执行插件代码前声明包身份、facets、协议要求、权限、订阅和静态贡献。
+`@dsh-std/manifest` 为 std 内部提供统一的组件声明，以及检查这些声明的工具。它接收上游整理好的组件信息，检查数据结构，再按照上游提供的规则校验具体内容，供后续编排和激活使用。
 
-Manifest 使用 `$schema` 和 `manifestVersion` 标识结构版本。Host 可以识别多个 Manifest 版本，并把它们投影为共同的 component、facet 和 protocol declaration 语义。支持一个版本不表示必须支持其他版本。
+这里的组件声明描述一个组件的身份、组成部分，以及各部分启动时需要的入口、协议和权限。Loader 或 Adapter 负责取得这些信息；manifest 将它们组织为 `ComponentManifest`，使 composition 和 lifecycle 可以使用同一种数据结构。
 
-Manifest 是安装与协商输入，不是运行时可用性证明。静态声明的 requirement、support 或 contribution 只有经过协议校验、composition、activation 和 publication 后，才能形成相应的运行时事实。
+## 上游提供什么
 
-## Motivation
+调用方提供三类输入：
 
-插件身份、入口和兼容要求必须能够在不执行代码的情况下读取。否则市场、安装器和 Host 只能在激活后发现能力缺失、权限不足或 contribution 冲突。
+| 输入 | 内容 | 用途 |
+| --- | --- | --- |
+| 组件声明 | 组件名称、版本、各部分的启动方式与需求 | 描述待编排的组件 |
+| 内容校验规则 | 激活声明和扩展声明各自的字段规则 | 检查声明中的具体内容 |
+| 协议目录 | core 的 `ProtocolCatalog`，记录当前认识的协议 | 检查声明引用的协议是否已在目录中登记 |
 
-Manifest 结构也会随协议发展而增加 facets、契约坐标和新的扩展点。版本字段使旧格式可以继续被明确识别，而不是让 Host 根据字段外观猜测语义。各 Manifest 版本最终投影到相同的组合模型，使 lifecycle 和领域协议不依赖某一版 JSON 字段名。
+组件声明可以由上游直接构造，也可以由本包从支持的包描述格式转换而来。manifest 按声明的数据结构进行处理。
 
-## Guide-level explanation
+内容校验规则由相应协议包或集成方提供，调用方将它们注册到 `ManifestDefinitionCatalog`。这个目录分别保存激活规则和扩展规则，以 `apiVersion` 与 `kind` 共同定位一条规则：前者标识协议及其版本，后者标识该协议中的对象类型。
 
-### Discovery
+协议目录是可选输入。调用方提供它时，manifest 会检查各项协议引用能否被目录识别。
 
-插件包根目录至多有一个 `dsh-plugin.json` 作为本标准的发现入口。Host 不把 `package.json` 字段、其他文件名或执行 JavaScript 后得到的对象自动视为等价 Manifest。
+## 组件声明如何组织
 
-Manifest 必须是静态 JSON。Host 在读取包身份、声明和兼容要求时不得执行插件代码，也不得根据 `$schema` URL 临时下载并执行解析逻辑。
+`ComponentManifest` 包含组件身份和组件内容两部分。身份放在 `metadata` 中，包含名称、版本和可选的显示名称；内容放在 `spec` 中，包含 facets 和组件之间的关系。
 
-### Manifest version
+Facet 是组件中分别描述启动方式与需求的部分。一个组件可以有多个 facet，每个 facet 在组件内有自己的名称，并可以包含以下声明：
 
-`$schema` 标识对应版本的静态 schema，`manifestVersion` 标识 Manifest 结构版本。两者必须一致。一个已经发布的 schema identifier 不得在原位置改成另一份结构。
+| 声明 | 字段 | 描述的内容 |
+| --- | --- | --- |
+| 激活 | `activation` | 使用哪种激活方式，以及该方式需要的启动参数 |
+| 协议需求与支持 | `protocols.requires`、`protocols.supports` | 该部分需要哪些协议，以及声明支持哪些协议 |
+| 扩展 | `extensions` | 该部分准备提供的功能及其配置 |
+| 权限请求 | `permissions` | 该部分申请的操作权限及相关参数 |
 
-Host 只解析自己明确支持的 Manifest 版本。未知版本返回 manifest-version-unsupported；Host 不能把它退回到较旧 schema，也不能忽略新版本中的 required 字段继续激活。
+激活声明和扩展声明都用 `apiVersion`、`kind` 指定对象类型，用 `spec` 保存该类型的具体内容。扩展声明还用 `metadata` 保存名称和标签。manifest 检查这些对象的共同结构，注册的校验规则解释各自的 `spec`。
 
-旧版本可以由同一 Host 继续支持。版本之间的字段转换必须是确定性的，并在校验结果中保留原始版本与输入 digest。
+组件之间的关系放在 `spec.relationships` 中，包含依赖、推荐、冲突和破坏关系。每项关系通过组件名称与版本范围描述目标，供 composition 编排组件时使用。
 
-### Component and facets
+组件必须（MUST）包含至少一个 facet；facet 名称在组件内必须（MUST）唯一。每个 facet 必须（MUST）包含激活、协议、扩展或权限声明中的至少一类。声明中的具体参数必须（MUST）使用 JSON 数据。
 
-一个 Manifest 描述一个可分发 component。Component 可以包含一个或多个 facets；每个 facet 是独立的静态声明与激活边界。
+## 校验如何进行
 
-Facet 至少可以声明：
+### 检查共同结构
 
-- activation entry；
-- protocol requirements；
-- potential protocol supports；
-- permissions；
-- subscriptions；
-- static extensions。
+`validateComponentManifest()` 检查组件与 facet 的字段结构、名称和版本格式、协议坐标、各类声明中的重复项，以及组件关系的版本范围。
 
-某个 Manifest 版本可以只定义其中一部分。例如只定义 `host` facet 的版本不因此为 `client` 或 `worker` 规定隐式行为。Host 不能从 facet 名称猜测执行位置、UI 或 transport；这些语义由 activation 与领域协议规定。
+`defineComponentManifest()` 在完成同样的检查后，复制并冻结声明，返回供后续处理使用的对象。
 
-### Protocol references
+结构不符合要求时，这两个接口抛出 `TypeError`，错误消息说明出错的字段和原因。
 
-协议引用使用 `apiVersion + kind`。Manifest schema 只校验坐标外壳；协议专属 `spec` 由相应 `ProtocolDefinition` 校验。
+### 按注册规则检查内容
 
-Activation、protocol requirement/support、extension 与 permission 中的 `spec` 都必须（MUST）是 lossless JSON 数据。Manifest 层必须在 definition 或 executable facet 能观察它们之前拒绝 Date、Map、函数、循环引用和嵌套 `undefined` 等 host-language 值；通过 JSON 文本解析并不免除 programmatic `ComponentManifest` builder 的同一检查。Manifest 层不得重写协议拥有的字段。
+`ManifestDefinitionCatalog.validate()` 接收组件声明，先检查共同结构，再逐个检查 facet 中的内容：
 
-协议 group 不必先进入某个公共目录才能出现在 Manifest。Host 若取得相应 definition，就按 core 规则校验和协商；未取得 definition 时，required requirement 阻止兼容，optional requirement 被报告为未满足。未知 support 不构成可用实现。
+1. 对激活声明，按坐标查找激活规则，调用其 `validateSpec()` 检查启动参数。
+2. 对扩展声明，按坐标查找扩展规则，调用其 `validateMetadata()`（如有）和 `validateSpec()` 检查名称、标签与配置。
+3. 调用方提供协议目录时，用 `ProtocolCatalog.understands()` 检查协议需求和支持声明中的坐标。
 
-Manifest 中的 potential support 只是 facet 可以发布的静态上限。Facet 激活后仍必须在 activation scope 内登记 implementation，并越过 publication barrier，才能产生 live support。
+校验规则通过 `ManifestObjectDefinition` 提供。其中 `validateSpec()` 是必需的方法，`validateMetadata()` 是扩展规则可选的方法。规则检查通过时正常返回，失败时抛出错误；manifest 将错误汇入校验报告，声明内容保持原样。
 
-### Extensions
+目录的 `registerActivation()` 和 `registerExtension()` 分别登记两类规则，并返回用于撤销本次登记的函数。同一类规则中的坐标必须（MUST）唯一。
 
-Manifest 版本可以规定 namespaced 字段或 contribution point。Host 不理解某项扩展时，可以按该扩展点的规则保留或忽略它，但不能声称对应功能已经生效。
+### 汇总校验结果
 
-扩展字段本身不能暗含 required 行为。会影响兼容性、激活、权限或运行时调用的内容必须表达为 protocol requirement/support、activation、permission、subscription 或带 definition 的 extension。
+内容校验返回 `ManifestValidationReport`，包含组件名称与版本、校验器名称与版本、来源、摘要和问题列表。调用方可以提供来源与摘要；省略时，来源为 `memory:`，摘要根据组件声明生成。
 
-组织自用协议和实验协议使用与其他协议相同的声明、协商和生命周期语义。它们是否被某份公共标准收录，只影响相应的兼容声明，不改变 core 对坐标的处理。
+每个问题记录类别 `code`、级别 `severity`、字段路径 `path` 和说明 `message`。当前问题分为两组：
 
-## Reference-level explanation
+| 级别 | 情况 | 类别 |
+| --- | --- | --- |
+| `warning` | 找不到激活或扩展规则，或协议目录不认识某个坐标 | `unknown-activation`、`unknown-extension`、`unknown-protocol` |
+| `error` | 已注册的激活或扩展规则检查失败 | `invalid-activation`、`invalid-extension` |
 
-### Community v0.15 structure
+报告的 `compatible` 表示本次校验是否没有 `error`；只有警告时该字段仍为 `true`。调用方据此读取校验结果并安排后续处理。
 
-Host 对 Community v0.15 Manifest 的支持至少涵盖以下结构：
+## 如何交给下游
 
-```ts
-interface CommunityPluginManifestV015 {
-  readonly $schema: string
-  readonly manifestVersion: '0.15'
-  readonly id: string
-  readonly name: string
-  readonly version: string
-  readonly facets: {
-    readonly host: {
-      readonly entry: string
-      readonly apiVersion: string
-    }
-  }
-  readonly requires?: {
-    readonly contracts?: readonly CommunityContractReference[]
-  }
-  readonly permissions?: readonly unknown[]
-  readonly contributes?: Readonly<Record<string, readonly unknown[]>>
-  readonly subscriptions?: readonly unknown[]
-  readonly license?: string
-  readonly source?: unknown
-  readonly artifact?: unknown
-}
+组件声明与校验报告是两份输出。声明保存组件内容，报告保存本次检查结果，调用方分别将它们交给需要的内部模块。
 
-interface CommunityContractReference extends ApiReference {
-  readonly optional?: boolean
-  readonly fallback?: string
-}
-```
+| 对接模块 | 使用的内容 | 承接的工作 |
+| --- | --- | --- |
+| composition | 组件身份、facets、组件关系和协议声明 | 组织待激活的组件，形成激活计划 |
+| lifecycle | 计划中的 facet、激活声明和扩展声明 | 执行激活，管理实例及其注册项的生命周期 |
+| Adapter | 组件声明和校验报告 | 串联校验、编排与激活，将组件能力接入产品 |
 
-该结构按以下规则进入共同组件模型：
+权限请求随 facet 交给后续权限决策环节；协议需求与支持声明随 facet 交给后续协商环节。
 
-`requires`、`permissions`、`contributes` 和 `subscriptions` 是可选容器；`requires.contracts` 也是可选数组。缺少这些字段必须与对应空对象或空数组产生等价 projection。Host 不得因省略空容器而拒绝 Manifest，也不得从字段缺失推断未声明的 requirement、permission、contribution 或 subscription。
+本包还提供 `findFacet()` 查找 facet，`facetIdentity()` 和 `facetKey()` 生成包含组件名称、版本与 facet 名称的身份标识，供这些模块定位同一份声明。`matchesExtensionPublicationName()` 用扩展的局部名称或保留的完整贡献标识匹配扩展，供激活时关联注册项。
 
-TypeScript API 使用宽松的 `PluginManifestInput` 表示待校验 JSON，并使用规范化的 `PluginManifest` 表示 `parseManifest` / `defineManifest` 的结果。后者必须恢复首版 API 已承诺的 `requires.contracts`、`permissions`、`contributes.commands` 与 `subscriptions` 空容器，使旧 Plugin 可以直接读取这些成员；规范化不得改变非空数据或 namespaced contribution point。
+## 包描述如何进入内部模型
 
-- `id`、`name`、`version`、`license`、`source` 和 `artifact` 形成 component metadata；
-- `facets.host.entry` 形成 `host` facet 的 activation；
-- `facets.host.apiVersion` 约束该 activation API，不作为领域协议版本；
-- `requires.contracts` 形成 protocol requirements；
-- `permissions` 由对应 permission definitions 解释；
-- `contributes.commands` 形成没有子命令的 `Command` extensions；
-- coordinate subscription 直接形成 event subscription；字符串形式必须通过该版本定义的稳定别名表解析为唯一坐标；
-- `compat`、`overrides` 和其他已声明的安装信息进入 admission 或 provenance，不产生 live support；
-- 该版本没有 potential support 声明时，不为 facet 补造 `protocols.supports`。
+本包支持 [DSH 社区互操作草案 v0.15](https://github.com/deepseek-ai/deepseek-harness/discussions/2714) 定义的 `dsh-plugin.json` 格式，以下称为 v0.15 格式。这层接口将包描述转换为内部组件声明：
 
-Community contribution 的 `id` 是源 Manifest 中的完整 contribution identity。投影器为了满足领域协议的名称语法，可以（MAY）为 `metadata.name` 选择确定性的局部名称；此时必须（MUST）在 `dsh.std/contribution-id` label 中保留原始 `id`。Activation publication 使用局部 `metadata.name` 或该完整 contribution id 均必须（MUST）解析到同一项静态 extension。若一个输入同时匹配多项 extension，Host 必须（MUST）以歧义错误拒绝 publication，不得按声明顺序选择。
+| 接口 | 输入与结果 |
+| --- | --- |
+| `parseManifest()` | 解析 JSON 文本，校验后返回规范化的 `PluginManifest` |
+| `validateManifest()` | 检查包描述对象的格式 |
+| `defineManifest()` | 校验、补齐空容器，复制并冻结包描述对象 |
+| `projectManifest()` | 将包描述对象转换为 `ComponentManifest` |
 
-通过 Manifest schema 只证明文件结构有效。Host 是否能够激活插件，仍取决于 activation API、required protocols、permission policy 和领域实现。
+`manifestVersion` 选择格式版本；当前支持 `0.15`。`$schema` 使用绝对 URI。本包随包导出的 JSON Schema 路径为 `@dsh-std/manifest/schema/dsh-plugin-0.15.schema.json`。
 
-### Projection result
+规范化时，省略的 `requires.contracts`、`permissions`、`contributes.commands` 和 `subscriptions` 被补为空容器。
 
-Manifest 校验成功后产生一个规范化的 component declaration，至少包含：
-
-- 原始 Manifest 版本、schema identifier 和内容 digest；
-- component identity 与 metadata；
-- facets 及其 activation；
-- protocol requirements 与 potential supports；
-- permissions、subscriptions 和 extensions；
-- 每个规范化项目对应的原始 JSON path；
-- 未解释、已忽略或仅保留的 namespaced extensions。
-
-Projection 不是第二种包内 Manifest。Composition、lifecycle 和 provenance 消费该结果，不要求插件发布内部对象格式。
-
-相同输入、相同 Manifest version definition 和相同协议别名表必须产生等价 projection。转换不能取决于对象属性顺序、包发现顺序或已经激活的插件。
-
-### Definition availability
-
-Manifest schema definition 解释文件结构；protocol definition 解释协议专属声明。二者不能互相代替。
-
-Host 必须在解释 protocol `spec` 前取得相应 definition。Definition 可以由 Host 内建、随 profile 安装、由显式配置选择，或来自满足 Host policy 的协议包。注册 definition 不产生 live support，也不授予权限。
-
-同一坐标存在内容不一致的 definitions 时，校验失败。Host 不能以 registry、package 或注册顺序选择其中一份。
-
-### Validation result
-
-校验结果至少包含：
-
-- Manifest version 与 schema identifier；
-- source URI 和内容 digest；
-- component identity；
-- projection digest；
-- validator identity；
-- warning/error 的稳定 code、JSON path 和说明；
-- 未知 required/optional protocols；
-- 未解释的 extensions。
-
-失败必须区分 JSON/schema 错误、版本不支持、projection 错误、protocol definition 不可用、activation API 不可用和 contribution 冲突。
-
-Permission 未授权、required live support 缺失和 activation failure 不属于 Manifest 语法错误；它们分别由 permission、composition 和 lifecycle 报告。
-
-## Security considerations
-
-Manifest 静态可分析不构成代码隔离。可信进程内插件仍可能绕过声明访问进程能力；permission 和 provenance 不能替代 sandbox。
-
-Schema identifier 不是可信代码来源。Host 不得在解析任意插件时按插件提供的 URL 下载并执行 schema、definition 或 validator。
-
-Artifact digest 证明指定字节内容，不证明发布者身份。来源、签名、attestation 和 conformance claim 是不同事实。
-
-## Rationale and alternatives
-
-### 只接受最新 Manifest 版本
-
-这会迫使现有插件在字段语义未改变时同步迁移，也会把兼容转换散落到各产品 loader。明确支持的旧版本可以通过确定性 projection 进入同一组件模型。
-
-### 接受所有未知字段
-
-未知字段可能包含 required 行为。只有 Manifest version 明示的 extension point 才能保存未知 namespaced 内容；行为语义必须通过已识别的协议或扩展定义表达。
-
-### 由 core 解析 Manifest
-
-包发现、JSON schema、entrypoint 和分发 metadata 不属于协议协商。Core 只处理投影后的 protocol declarations。
-
-### 把静态 support 当作实现
-
-静态声明不能证明 handler 已绑定或配置已启用。Potential support 只用于 preflight；live support 来自 activation publication。
-
-## Unresolved questions
-
-### Shared metadata
-
-License、source、artifact、override 和安装影响字段中哪些应在所有 Manifest 版本间采用共同结构，取决于相应 schema 是否已经具有跨实现语义。
+v0.15 转换产生一个 `host` facet：包的身份形成组件身份，入口形成激活声明，契约需求形成协议需求，权限请求和静态贡献分别形成权限与扩展声明。订阅、来源、制品和安装相关信息保留在 `PluginManifest` 中；当前 `ComponentManifest` 接收身份、激活、协议需求、权限与扩展信息。

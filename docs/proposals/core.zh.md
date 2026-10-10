@@ -49,7 +49,7 @@ Core 提供共同的声明外壳和协商入口。领域协议负责解释自身
 
 ```ts
 interface ProtocolDeclaration {
-  readonly participant: ParticipantIdentity
+  readonly participant: { readonly id: string }
   readonly requires?: readonly ProtocolRequirement[]
   readonly supports?: readonly ProtocolSupport[]
 }
@@ -141,22 +141,20 @@ Core 只要求身份在当前协商范围内唯一。身份如何认证、是否
 
 Manifest facet 不是 participant。Facet 是发行物中的静态声明和激活单位；participant 是 coordinator 为 activation instance 创建、实际参加某次协商的运行实体。组件模型第一版令一个 activation instance 对应一个本地 participant；同一 facet 的多次激活仍会产生不同 participants。产品也可以产生没有 manifest facet 的内建 participant。
 
-Core 不把 component id、facet name 或进程位置规定为 `ParticipantIdentity` 的固定字段。需要归属信息的实现通过 lifecycle/provenance 保存本地关联；向连接对端公开哪些关联由 connection view 和 policy 决定。
+Core 不把 component id、facet name 或进程位置规定为 participant 身份的固定字段。需要归属信息的实现通过 lifecycle/provenance 保存本地关联；向连接对端公开哪些关联由 connection view 和 policy 决定。
 
 ### Protocol definition
 
 `ProtocolDefinition` 是 evaluator 对一份领域协议的本地解释。概念接口如下：
 
 ```ts
-interface ProtocolValidationContext extends ApiReference {}
-
 interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, Agreement = unknown>
   extends ApiReference {
   readonly accepts?: readonly string[]
-  validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
-  validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
-  readonly validateAgreement?: (agreement: unknown, context: ProtocolValidationContext) => Agreement
-  negotiate(input: ProtocolNegotiationInput<RequirementSpec, SupportSpec>): ProtocolNegotiationResult<Agreement>
+  validateRequirement(spec: unknown, context: ApiReference): RequirementSpec
+  validateSupport(spec: unknown, context: ApiReference): SupportSpec
+  readonly validateAgreement?: (agreement: unknown, context: ApiReference) => Agreement
+  negotiate(input: ProtocolNegotiationInput<RequirementSpec, SupportSpec>): ProtocolNegotiationOutcome<Agreement>
 }
 ```
 
@@ -247,6 +245,17 @@ Core 不能独自判断领域协议是否真正兼容。Evaluator 必须安装�
 一旦 core 认识 endpoint、presentation、session 或 transport 字段，新增协议就需要修改元协议。协议专属内容保留在其 `spec` 和 agreement 中，并由对应 definition 校验。
 
 ## Implementation boundary
+
+TypeScript 参考实现按用途提供四个入口：
+
+| 入口 | 内容 |
+| --- | --- |
+| `@dsh-std/core` | 协议声明、definition、catalog 与协商报告 |
+| `@dsh-std/core/identity` | 协议坐标的校验、比较与索引键 |
+| `@dsh-std/core/json` | 协议 JSON 数据校验与冻结快照 |
+| `@dsh-std/core/version` | 组件包的 SemVer 与版本范围工具 |
+
+参与者身份直接使用 `{ id }`，评估器身份直接使用 `{ name, version }`。校验上下文使用 `ApiReference`，协商输入的每行直接包含 participant 和相应 requirement 或 support。
 
 `@dsh-std/core` 的参考实现只保留通用协议标识、声明、definition catalog 与协商分派。早期原型中的 `DshResource`、`ExecutionPlane`、插件关系、`PluginRegistry` 和 `RuntimeSnapshot` 已迁移出 core：
 

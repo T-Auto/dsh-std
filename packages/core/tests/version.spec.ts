@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareSemanticVersions, parseSemanticVersion, satisfiesVersionRange } from '../src/index.js'
+import { compareSemanticVersions, parseSemanticVersion, satisfiesVersionRange } from '../src/version.js'
 
 describe('portable semantic version ranges', () => {
   it('orders releases and prereleases according to SemVer precedence', () => {

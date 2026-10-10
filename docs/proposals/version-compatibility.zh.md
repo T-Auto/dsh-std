@@ -55,24 +55,22 @@
 
 `ProtocolDefinition.accepts` 可以把多个 `apiVersion` 映射到同一份 definition。每个被接受的版本仍与原 `kind` 组成独立坐标。Core 必须拒绝由不同 definitions 重复注册的相同坐标。
 
-Core 不得从 `apiVersion` 的 group、major、stability、revision 或字符串顺序推断兼容关系。`protocolFamilyKey()` 只提供分组键，不构成互操作声明。
+Core 不得从 `apiVersion` 的 group、major、stability、revision 或字符串顺序推断兼容关系。
 
 Definition 可以识别不同稳定度、不同 major，或由私有协议规定的离散版本集合。是否允许这些版本互操作完全由该协议的规范决定。
 
 ### 版本感知校验
 
-Core 调用 `validateRequirement` 和 `validateSupport` 时，必须同时提供包含原始 `apiVersion + kind` 的 `ProtocolValidationContext`。Definition 必须针对声明的准确版本校验 `spec`，不得先把旧版本静默投影为新版本再按新 schema 接受。
+Core 调用 `validateRequirement` 和 `validateSupport` 时，必须同时提供包含原始 `apiVersion + kind` 的 `ApiReference`。Definition 必须针对声明的准确版本校验 `spec`，不得先把旧版本静默投影为新版本再按新 schema 接受。
 
 概念接口如下：
 
 ```ts
-interface ProtocolValidationContext extends ApiReference {}
-
 interface ProtocolDefinition<RequirementSpec, SupportSpec, Agreement, Policy>
   extends ApiReference {
   readonly accepts?: readonly string[]
-  validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
-  validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
+  validateRequirement(spec: unknown, context: ApiReference): RequirementSpec
+  validateSupport(spec: unknown, context: ApiReference): SupportSpec
   negotiate(
     input: ProtocolNegotiationInput<RequirementSpec, SupportSpec, Policy>,
   ): ProtocolNegotiationOutcome<Agreement>
@@ -193,7 +191,7 @@ npm package version 与协议 `apiVersion` 是独立版本轴。更新 definitio
 
 ## 兼容性
 
-只识别主坐标并执行精确版本协商的既有 definitions 不受影响。为校验函数增加 `ProtocolValidationContext` 是向后兼容的调用扩展：现有只接收 `spec` 的 TypeScript 函数仍可作为 validator；新 definition 可以读取第二个参数进行版本专属校验。
+只识别主坐标并执行精确版本协商的既有 definitions 不受影响。为校验函数增加 `ApiReference` 是向后兼容的调用扩展：现有只接收 `spec` 的 TypeScript 函数仍可作为 validator；新 definition 可以读取第二个参数进行版本专属校验。
 
 把版本加入 `accepts` 是可观察的 definition 能力变更，但不自动建立任何兼容边。协议只有在规范、validator、协商器、agreement、fixtures 和方向性测试一致时，才能声称支持跨版本协商。
 

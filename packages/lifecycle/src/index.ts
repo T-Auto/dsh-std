@@ -1,13 +1,5 @@
-import {
-  ProtocolCatalog,
-  defineProtocolDeclaration,
-  protocolKey,
-  sameProtocol,
-  type ApiReference,
-  type NegotiatedProtocol,
-  type ProtocolDeclaration,
-  type ProtocolSupport,
-} from '@dsh-std/core'
+import { ProtocolCatalog, defineProtocolDeclaration, type ApiReference, type NegotiatedProtocol, type ProtocolDeclaration, type ProtocolSupport } from '@dsh-std/core'
+import { protocolKey, sameProtocol } from '@dsh-std/core/identity'
 import type { CompositionPlan, SelectedFacet } from '@dsh-std/composition'
 import {
   matchesExtensionPublicationName,

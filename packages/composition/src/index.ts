@@ -1,12 +1,5 @@
-import {
-  ProtocolCatalog,
-  protocolKey,
-  sameProtocol,
-  type ApiReference,
-  type ProtocolDeclaration,
-  type ProtocolRequirement,
-  type ProtocolSupport,
-} from '@dsh-std/core'
+import { ProtocolCatalog, type ApiReference, type ProtocolDeclaration, type ProtocolRequirement, type ProtocolSupport } from '@dsh-std/core'
+import { protocolKey, sameProtocol } from '@dsh-std/core/identity'
 import {
   defineComponentManifest,
   facetIdentity,
@@ -17,7 +10,7 @@ import {
   type ManifestExtension,
   type PermissionRequest,
 } from '@dsh-std/manifest'
-import { satisfiesVersionRange } from '@dsh-std/core'
+import { satisfiesVersionRange } from '@dsh-std/core/version'
 
 export const API_VERSION = 'composition.dsh/v1alpha1'
 

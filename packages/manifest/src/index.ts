@@ -1,15 +1,7 @@
-import {
-  ProtocolCatalog,
-  protocolKey,
-  validateApiReference,
-  type ApiReference,
-  type ProtocolRequirement,
-  type ProtocolSupport,
-  type VersionRange,
-  assertVersionRange,
-  parseSemanticVersion,
-  validateProtocolJsonValue,
-} from '@dsh-std/core'
+import { ProtocolCatalog, type ApiReference, type ProtocolRequirement, type ProtocolSupport } from '@dsh-std/core'
+import { protocolKey, validateApiReference } from '@dsh-std/core/identity'
+import { validateProtocolJsonValue } from '@dsh-std/core/json'
+import { type VersionRange, assertVersionRange, parseSemanticVersion } from '@dsh-std/core/version'
 export const COMMUNITY_V015_MANIFEST_VERSION = '0.15'
 export const COMPONENT_API_VERSION = 'manifest.dsh/internal/v1alpha1'
 export const PACKAGE_VERSION = '0.1.1-rc.3'

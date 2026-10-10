@@ -1,4 +1,5 @@
-import { freezeProtocolJsonValue, type ApiReference, type ProtocolJsonValue, type ProtocolSupport } from '@dsh-std/core'
+import { type ApiReference, type ProtocolSupport } from '@dsh-std/core'
+import { freezeProtocolJsonValue, type ProtocolJsonValue } from '@dsh-std/core/json'
 import type { CapabilityBinding, ConnectionEndpointReference, ConnectionPlan, EndpointOffer } from './model.js'
 
 export interface CapabilityHandlerContext<TProgress = unknown> {
