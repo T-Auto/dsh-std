@@ -4,6 +4,8 @@ Changes to `@dsh-std/composition` are recorded here.
 
 ## Unreleased
 
+- Updated core utility imports to the grouped public entry points.
+
 - Made manifest, driver, and activation ordering comparisons independent of locale-specific collation and added deterministic conflict coverage.
 
 ## 0.1.1-rc.1

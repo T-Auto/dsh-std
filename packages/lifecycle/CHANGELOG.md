@@ -4,6 +4,8 @@ Changes to `@dsh-std/lifecycle` are recorded here.
 
 ## Unreleased
 
+- Updated core utility imports to the grouped public entry points.
+
 - Closed activation scopes reject late registrations, preserve activation and cleanup failures, isolate observer failures, and share concurrent deactivation settlement.
 - Scope participant identities by a monotonic activation generation so concurrent instances of one facet cannot collide during negotiation.
 

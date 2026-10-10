@@ -55,7 +55,7 @@ interface EventEnvelope<Payload = unknown> {
   readonly apiVersion: string
   readonly kind: string
   readonly id: string
-  readonly source: ParticipantIdentity
+  readonly source: { readonly id: string }
   readonly sequence?: number
   readonly time?: string
   readonly payload: Payload

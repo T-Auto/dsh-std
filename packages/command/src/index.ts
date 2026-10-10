@@ -5,7 +5,7 @@ import type {
   ProtocolIssue,
   ProtocolSupport,
 } from '@dsh-std/core'
-import { validateApiReference } from '@dsh-std/core'
+import { validateApiReference } from '@dsh-std/core/identity'
 import type { ManifestDefinitionCatalog, ManifestExtension } from '@dsh-std/manifest'
 import type {
   CapabilityCall,

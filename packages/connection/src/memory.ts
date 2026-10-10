@@ -1,4 +1,5 @@
-import { sameProtocol, type ApiReference } from '@dsh-std/core'
+import { type ApiReference } from '@dsh-std/core'
+import { sameProtocol } from '@dsh-std/core/identity'
 import {
   ConnectionInvocationError,
   type CapabilityCall,

@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/manifest` are recorded here.
 
+## Unreleased
+
+- Updated core utility imports to the grouped public entry points.
+
 ## 0.1.1-rc.3
 
 - Require activation, protocol, extension, and permission specs in the internal Component projection to remain lossless JSON data before definitions or executable code can observe them.
