@@ -17,7 +17,9 @@ dsh plugin --profile web add <standard-component>
 
 ## 运行方式
 
-本包是 DSH profile bundle，由 `cordis.patch.yml` 激活。Adapter 读取当前 profile 的 dependencies，发现 Community v0.15 `dsh-plugin.json`，校验组件声明并读取 facet 入口。
+本包是 DSH profile bundle，由 `cordis.patch.yml` 激活。Adapter 读取当前 profile 的 dependencies，发现 Community v0.15 `dsh-plugin.json`，检查 Host API，并在导入每个 host facet 入口前校验与预检静态声明。未知的必需 contract 或缺少 live 支持的必需 contract 会在模块求值前拒绝该 facet；缺少可选 contract 不阻止加载。仅已安装的 provider 不算 live 能力。
+
+导入后，`mount()` 在激活前依据当前 live 发布再次检查。预检只覆盖 manifest 可读的需求，不预判只有执行动态代码才能发现的需求，也不代替运行时协商或回滚。
 
 `DshStandardAdapter` 组织协议协商与激活，向组件提供所需 API，并将组件发布的能力接入产品服务。宿主侧需要 `sessionController` 服务。
 

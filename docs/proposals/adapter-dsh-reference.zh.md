@@ -13,9 +13,11 @@ dsh plugin --profile web add @dsh-std/adapter-dsh
 dsh plugin --profile web add <standard-component>
 ```
 
-Adapter 读取 profile 的普通 dependencies，找到各包中的 `dsh-plugin.json`，校验并转换为标准组件声明。对于采用 `lifecycle.dsh/v1alpha1`、`FacetModule` 激活类型的 facet，它解析包内入口模块，取得模块导出的激活函数，再交给 `mount()`。
+Adapter 读取 profile 的普通 dependencies，找到各包中的 Community v0.15 `dsh-plugin.json`，检查 Host facet API 并转换为标准组件声明。对于采用 `lifecycle.dsh/v1alpha1`、`FacetModule` 激活类型的 facet，本实现必须在导入入口模块之前完成静态声明校验与组合预检；不能只阻止 `activate()` 而允许已知不兼容入口的模块顶层代码执行。
 
-`mount()` 检查该 facet 的声明与需求，建立激活计划，然后调用生命周期协调器。协调器创建本次实例和激活上下文；激活驱动调用模块的 `activate(context)`。
+预检使用已安装的协议定义和当前已发布的 live declarations。Manifest 中的未知必需 contract 或缺少支持的必需 contract 必须在入口模块求值前拒绝；缺少可选 contract 不阻止加载。未激活或仅已安装的 provider 不得作为 live 支持。该检查仅覆盖 manifest 可读的需求，不承诺预知任意动态代码才会产生的需求。
+
+预检成功后，Adapter 导入包内入口，取得激活函数并交给 `mount()`。`mount()` 必须重新检查当前 live 状态并建立新计划，防止模块求值期间 provider 退出等状态变化使前一次预检失效；导入前的计划不作为激活授权。之后生命周期协调器创建本次实例和激活上下文，激活驱动调用模块的 `activate(context)`，实际协商和发布校验仍按生命周期规则执行。后续 facet 加载或激活失败时，Adapter 逆序卸载本次发现流程已挂载的 facet。
 
 ```mermaid
 flowchart TB
@@ -23,8 +25,8 @@ flowchart TB
         Loader["Loader 与 Cordis"]
     end
     subgraph Plugin["Adapter 插件"]
-        Discover["发现 manifest 并读取入口模块"]
-        Mount["mount：检查声明与建立计划"]
+        Discover["发现 manifest、静态预检后导入入口"]
+        Mount["mount：重验 live 状态与建立计划"]
         Lifecycle["生命周期协调器与激活驱动"]
         Map["能力发布与产品接入"]
     end

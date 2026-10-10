@@ -9,7 +9,7 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { defineProtocolDeclaration } from '@dsh-std/core'
-import { defineComponentManifest } from '@dsh-std/manifest'
+import { defineComponentManifest, type CommunityContractReference } from '@dsh-std/manifest'
 import { StandardEndpointRuntime, resolveConnection, type CapabilityClient } from '@dsh-std/connection'
 import {
   notificationClient,
@@ -471,6 +471,201 @@ describe('@dsh-std/adapter-dsh', () => {
       }),
     ]))
     for (const dispose of disposers) await dispose()
+  })
+
+  describe('profile preflight before import', () => {
+    function writePreflightComponent(
+      contracts: readonly CommunityContractReference[] = [],
+      options: {
+        profileDir?: string
+        packageName?: string
+        hostApiVersion?: string
+        importBody?: string
+        activateBody?: string
+      } = {},
+    ) {
+      const profileDir = options.profileDir ?? mkdtempSync(join(tmpdir(), 'dsh-std-preflight-profile-'))
+      if (options.profileDir === undefined) temporaryRoots.push(profileDir)
+      const packageName = options.packageName ?? 'preflight-component'
+      const profilePath = join(profileDir, 'package.json')
+      const dependencies = existsSync(profilePath)
+        ? (JSON.parse(readFileSync(profilePath, 'utf8')) as { dependencies: Record<string, string> }).dependencies
+        : {}
+      writeFileSync(profilePath, JSON.stringify({
+        name: 'fixture-profile', private: true, dependencies: { ...dependencies, [packageName]: '1.0.0' },
+      }))
+      const componentDir = join(profileDir, 'node_modules', packageName)
+      mkdirSync(componentDir, { recursive: true })
+      writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
+        name: packageName, version: '1.0.0', type: 'module',
+      }))
+      writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
+        $schema: 'urn:example:dsh-plugin:0.15', manifestVersion: '0.15',
+        id: 'example.preflight.' + packageName, name: 'Preflight Component', version: '1.0.0',
+        facets: { host: { entry: 'host.js', apiVersion: options.hostApiVersion ?? 'v1alpha1' } },
+        requires: { contracts },
+      }))
+      const imported = join(profileDir, packageName + '.imported')
+      const activated = join(profileDir, packageName + '.activated')
+      const deactivated = join(profileDir, packageName + '.deactivated')
+      writeFileSync(join(componentDir, 'host.js'), [
+        'import { writeFileSync } from "node:fs"',
+        'writeFileSync(' + JSON.stringify(imported) + ', "imported")',
+        options.importBody ?? '',
+        'export default {',
+        '  async activate(context) {',
+        '    writeFileSync(' + JSON.stringify(activated) + ', "activated")',
+        options.activateBody ?? '',
+        '  },',
+        '  deactivate() { writeFileSync(' + JSON.stringify(deactivated) + ', "deactivated") },',
+        '}',
+        '',
+      ].join('\n'))
+      return { profileDir, imported, activated, deactivated }
+    }
+
+    const unavailableContracts = [
+      { label: 'known', reference: { apiVersion: DSH_PRESENTATION_API_VERSION, kind: 'Notification' },
+        error: /no selected or live participant may support presentation\.dsh\/v1alpha1 Notification/ },
+      { label: 'unknown', reference: { apiVersion: 'private.example/v1alpha1', kind: 'Missing' },
+        error: /no protocol definition recognizes private\.example\/v1alpha1 Missing/ },
+    ]
+
+    it.each(unavailableContracts)('rejects a $label required contract before importing its host facet', async ({ reference, error }) => {
+      const { adapter } = await fixture(false)
+      const before = adapter.publications.list()
+      const component = writePreflightComponent([reference])
+
+      await expect(adapter.mountProfileComponents(component.profileDir)).rejects.toThrow(error)
+      expect(existsSync(component.imported)).toBe(false)
+      expect(existsSync(component.activated)).toBe(false)
+      expect(adapter.publications.list()).toEqual(before)
+      expect((await adapter.snapshot()).facets).toHaveLength(1)
+    })
+
+    it.each(unavailableContracts)('loads its host facet when a missing $label contract is optional', async ({ reference }) => {
+      const { adapter } = await fixture(false)
+      const before = adapter.publications.list()
+      const component = writePreflightComponent([{ ...reference, optional: true }])
+
+      const disposers = await adapter.mountProfileComponents(component.profileDir)
+      expect(existsSync(component.imported)).toBe(true)
+      expect(existsSync(component.activated)).toBe(true)
+      expect((await adapter.snapshot()).facets).toHaveLength(2)
+      for (const dispose of disposers) await dispose()
+      expect(existsSync(component.deactivated)).toBe(true)
+      expect(adapter.publications.list()).toEqual(before)
+    })
+
+    it('keeps the Host API mismatch check before import', async () => {
+      const { adapter } = await fixture(false)
+      const component = writePreflightComponent([], { hostApiVersion: 'v2alpha1' })
+
+      await expect(adapter.mountProfileComponents(component.profileDir)).rejects.toThrow(
+        'requires Host facet API v2alpha1; adapter provides v1alpha1',
+      )
+      expect(existsSync(component.imported)).toBe(false)
+      expect(existsSync(component.activated)).toBe(false)
+    })
+
+    it('does not treat an unactivated provider facet as live support', async () => {
+      const { adapter } = await fixture(false)
+      await adapter.mount({
+        manifest: defineComponentManifest({
+          apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+          metadata: { name: 'example.preflight.provider', version: '1.0.0' },
+          spec: { facets: [
+            { name: 'idle', activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'idle' } } },
+            { name: 'notifications', activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'notifications' } },
+              protocols: { supports: [notificationSupport] } },
+          ] },
+        }),
+        facet: 'idle', activate() {},
+      })
+      const before = adapter.publications.list()
+      const component = writePreflightComponent([notificationSupport])
+
+      await expect(adapter.mountProfileComponents(component.profileDir)).rejects.toThrow(/cannot be composed/)
+      expect(existsSync(component.imported)).toBe(false)
+      expect(existsSync(component.activated)).toBe(false)
+      expect(adapter.publications.list()).toEqual(before)
+    })
+
+    async function publishNotifications(adapter: DshStandardAdapter): Promise<() => Promise<void>> {
+      return await adapter.mount({
+        manifest: defineComponentManifest({
+          apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+          metadata: { name: 'example.preflight.notifications', version: '1.0.0' },
+          spec: { facets: [{
+            name: 'runtime',
+            activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'notifications' } },
+            protocols: { supports: [notificationSupport] },
+          }] },
+        }),
+        facet: 'runtime',
+        activate(activation) {
+          activation.protocols.implement(notificationSupport, notificationImplementation(
+            activation.identity.participantId,
+            { notify: () => ({ status: 'submitted', value: { accepted: true } }) },
+          ))
+        },
+      })
+    }
+
+    it('loads a required contract when its provider is already published', async () => {
+      const { adapter } = await fixture(false)
+      const disposeProvider = await publishNotifications(adapter)
+      const before = adapter.publications.list()
+      const component = writePreflightComponent([notificationSupport], {
+        activateBody: 'if (context.protocols.client(' + JSON.stringify(notificationSupport) + ') === undefined) throw new Error("Notification client is unavailable")',
+      })
+
+      const disposers = await adapter.mountProfileComponents(component.profileDir)
+      expect(existsSync(component.imported)).toBe(true)
+      expect(existsSync(component.activated)).toBe(true)
+      expect((await adapter.snapshot()).facets).toHaveLength(3)
+      for (const dispose of disposers) await dispose()
+      expect(adapter.publications.list()).toEqual(before)
+      await disposeProvider()
+    })
+
+    it('rechecks live support lost during import before activating', async () => {
+      const { adapter } = await fixture(false)
+      const before = adapter.publications.list()
+      const disposeProvider = await publishNotifications(adapter)
+      const hooks = globalThis as { __dshStdPreflightImport?: () => Promise<void> }
+      hooks.__dshStdPreflightImport = disposeProvider
+      try {
+        const component = writePreflightComponent([notificationSupport], {
+          importBody: 'await globalThis.__dshStdPreflightImport()',
+        })
+        await expect(adapter.mountProfileComponents(component.profileDir)).rejects.toThrow(/cannot be composed/)
+        expect(existsSync(component.imported)).toBe(true)
+        expect(existsSync(component.activated)).toBe(false)
+        expect(adapter.publications.list()).toEqual(before)
+        expect((await adapter.snapshot()).facets).toHaveLength(1)
+      } finally {
+        delete hooks.__dshStdPreflightImport
+      }
+    })
+
+    it('unmounts earlier profile facets when a later preflight fails', async () => {
+      const { adapter } = await fixture(false)
+      const before = adapter.publications.list()
+      const first = writePreflightComponent([], { packageName: 'a-first' })
+      const rejected = writePreflightComponent([notificationSupport], {
+        profileDir: first.profileDir, packageName: 'z-rejected',
+      })
+
+      await expect(adapter.mountProfileComponents(first.profileDir)).rejects.toThrow(/cannot be composed/)
+      expect(existsSync(first.imported)).toBe(true)
+      expect(existsSync(first.activated)).toBe(true)
+      expect(existsSync(first.deactivated)).toBe(true)
+      expect(existsSync(rejected.imported)).toBe(false)
+      expect(existsSync(rejected.activated)).toBe(false)
+      expect(adapter.publications.list()).toEqual(before)
+      expect((await adapter.snapshot()).facets).toHaveLength(1)
+    })
   })
 
   it('gives a standard facet a callable client for its negotiated protocol', async () => {
