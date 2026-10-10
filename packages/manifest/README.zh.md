@@ -1,7 +1,9 @@
 # @dsh-std/manifest
 
-Community v0.15 `dsh-plugin.json` 的静态对象模型、JSON Schema、校验器和 Host 内部投影。内置解析器由 `manifestVersion` 选择；`parseManifest()` 只要求 `$schema` 是绝对 URI，不把它绑定到不存在的 canonical URL，也不联网获取 schema。
+std 内部的组件声明与校验工具。上游提供组件信息和内容校验规则，本包将信息组织为统一的 `ComponentManifest`，检查结构与具体内容，供 composition 编排、lifecycle 激活和 Adapter 集成使用。
 
-本包通过 `@dsh-std/manifest/schema/dsh-plugin-0.15.schema.json` 导出本地草案 schema。它是随包发布的校验资源，不表示 community#24 已经指定 canonical schema URI。
+组件声明包含身份、各个 facet 的启动方式、协议需求与支持、扩展、权限请求，以及组件之间的关系。`ManifestDefinitionCatalog` 保存上游注册的激活和扩展校验规则；调用方还可以提供 core 的 `ProtocolCatalog`，检查声明引用的协议。内容校验结果通过 `ManifestValidationReport` 汇总。
 
-空的 `requires`、`permissions`、`contributes` 和 `subscriptions` 容器可以省略。省略与显式空容器产生相同投影；`0.1.0-rc1` 已接受的 Manifest 继续有效。
+本包也提供 [DSH 社区互操作草案 v0.15](https://github.com/deepseek-ai/deepseek-harness/discussions/2714) 定义的 `dsh-plugin.json` 格式的解析、规范化和内部模型转换，随包导出 `@dsh-std/manifest/schema/dsh-plugin-0.15.schema.json`。
+
+组件模型、校验流程、接口与下游对接见[组件设计](../../docs/proposals/manifest.zh.md)。
