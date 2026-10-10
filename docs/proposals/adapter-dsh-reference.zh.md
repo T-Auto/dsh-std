@@ -70,6 +70,16 @@ flowchart TB
 
 组件取得协议 API 时，Adapter 为本次实例创建连接端点，并与自身端点建立内存连接。协商后的 client 进入激活上下文，连接释放操作关联到实例清理范围。
 
+## UI 精确版本与 browser 安装契约
+
+`registerUiContributionProvider(provider, options)` 的 `options.apiVersions` 未提供时必须只发布 `ui.dsh/v1alpha1 ContributionHost`。显式列表必须非空，只包含 `ui.dsh/v1alpha1` 与 `ui.dsh/v1alpha2`，且不得重复。Adapter 必须按每个发布的精确坐标声明相同的实际 surface support，不得用 V1 support 满足 V2 requirement。Provider 撤销必须永久失效其旧 agreement，即使相同对象或 participant 再次注册也不得恢复；consumer 必须通过新的 activation 与新注册协商。
+
+每次 activation 必须按 consumer 声明的精确 ContributionHost 版本分别绑定 client。V2 client 只包含成功协商的 required 与 optional surfaces；缺失 optional surface 的 warning 不得阻止具备全部 required surfaces 的 facet 激活，缺失项不得进入注册授权。V1 client 不得复用 V2 的额外授权。Browser 对整体 optional 且没有 surface 授权的已协商协议必须保留可查询的 agreement 与 warning，但不得授予 client。多个版本共享同一 activation owner 时，同一 surface 与 contribution ID 不得重复注册；lease disposer 完成后可复用 ID。撤销 Host provider、激活失败与 facet 卸载必须释放受影响的全部版本绑定，即使某项 disposer 失败也必须继续清理其他绑定。
+
+独立 browser runtime 必须为实际实现的 SettingsSection 与 ToolCallView surfaces 发布两个精确 ContributionHost 版本，并独立完成 composition、agreement 与 activation client 绑定，不依赖 Host provider 注册 API。它必须复用 browser activation context 与 facet cleanup 边界，且不得混合不同版本的授权。
+
+Community v0.15 包内 browser facet 必须经既有 namespaced `contributes['x-dev.dsh-std.extensions']` lane 声明 `browser.ui.dsh/v1alpha1 LocalModule`，`spec` 为 `{ module, requirements }`。包发现、manifest 投影与 browser module descriptor 传递必须保留 requirements 的精确版本及 V2 `optionalSurfaces`；这些 requirements 不得合并进 Host facet。安装声明示例见 [adapter README](../../packages/adapter-dsh/README.zh.md#ui-contributionhost-版本)。本契约不改变旧 Manifest 根级 `requires`/`panels`，不定义 TUI LocalModule 或公共 terminal surface 包。
+
 ## 卸载与清理
 
 `mount()` 返回异步卸载函数。卸载时，Adapter 移除产品注册和连接声明，再交给生命周期协调器停止实例、调用停止回调并释放登记的资源。

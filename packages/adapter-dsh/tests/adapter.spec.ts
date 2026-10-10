@@ -10,6 +10,7 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { defineProtocolDeclaration } from '@dsh-std/core'
 import { defineComponentManifest, type CommunityContractReference } from '@dsh-std/manifest'
+import { DshBrowserUiRuntime } from '../src/client.js'
 import { StandardEndpointRuntime, resolveConnection, type CapabilityClient } from '@dsh-std/connection'
 import {
   notificationClient,
@@ -18,6 +19,9 @@ import {
 } from '@dsh-std/presentation'
 import {
   contributionHostRequirement,
+  contributionHostRequirementV2,
+  type UiContributionProvider,
+  type ContributionHostApiVersion,
   type ContributionHostClient,
 } from '@dsh-std/ui'
 import {
@@ -350,7 +354,7 @@ describe('@dsh-std/adapter-dsh', () => {
     expect((await adapter.snapshot()).facets.some(row => row.identity.component === 'example.fixture.component')).toBe(false)
   })
 
-  it('discovers a browser facet from the standard manifest without a product Loader entry', async () => {
+  it.each(['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] as const)('installs a Community LocalModule with exact %s requirements without a product Loader entry', async apiVersion => {
     const { ctx, adapter } = await fixture()
     const routes: Array<{
       path: string
@@ -385,10 +389,12 @@ describe('@dsh-std/adapter-dsh', () => {
           spec: {
             module: 'client.js',
             requirements: [{
-              apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost',
+              apiVersion, kind: 'ContributionHost',
               spec: { surfaces: [{
                 apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'SettingsSection', mode: 'local-module',
-              }] },
+              }], ...(apiVersion === 'ui.dsh/v1alpha2' ? { optionalSurfaces: [{
+                apiVersion: 'example.ui/v1', kind: 'Missing', mode: 'local-module',
+              }] } : {}) },
             }],
           },
         }],
@@ -417,6 +423,46 @@ describe('@dsh-std/adapter-dsh', () => {
     })
     expect(status).toBe(200)
     expect(Buffer.from(body as Uint8Array).toString('utf8')).toContain('__ModuleLoader__.load')
+    const requirement = facets[0]!.manifest.spec.facets[0]!.protocols!.requires![0]!
+    expect(requirement.apiVersion).toBe(apiVersion)
+    expect(requirement.spec).toEqual({
+      surfaces: [{ apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'SettingsSection', mode: 'local-module' }],
+      ...(apiVersion === 'ui.dsh/v1alpha2' ? { optionalSurfaces: [{ apiVersion: 'example.ui/v1', kind: 'Missing', mode: 'local-module' }] } : {}),
+    })
+    const browser = new Context()
+    const entries: Record<string, unknown>[] = []
+    browser.provide('slots', {
+      inject(_name: string, setup: () => () => void) { return setup() },
+      register(options: Record<string, unknown>) {
+        entries.push(options)
+        return () => { entries.splice(entries.indexOf(options), 1) }
+      },
+    } as never)
+    const runtime = new DshBrowserUiRuntime(browser)
+    let ui: ContributionHostClient | undefined
+    const disposeBrowser = await runtime.mountFacet({
+      manifest: facets[0]!.manifest, facet: facets[0]!.facet,
+      module: { activate(activation) {
+        ui = activation.protocols.client({ apiVersion, kind: 'ContributionHost' })
+        expect(ui!.surfaces.map(row => row.kind)).toEqual(['SettingsSection'])
+        expect(activation.protocols.client({
+          apiVersion: apiVersion === 'ui.dsh/v1alpha1' ? 'ui.dsh/v1alpha2' : 'ui.dsh/v1alpha1', kind: 'ContributionHost',
+        })).toBeUndefined()
+        expect(() => ui!.register({ descriptor: {
+          id: 'missing', surface: { apiVersion: 'example.ui/v1', kind: 'Missing' }, content: {},
+        }, localModule: { component: () => null } })).toThrow(/not negotiated/)
+        ui!.register({ descriptor: {
+          id: 'installed-settings', surface: { apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'SettingsSection' }, content: { label: 'Installed' },
+        }, localModule: { component: () => null } })
+      } },
+    })
+    expect(entries).toHaveLength(1)
+    await disposeBrowser()
+    expect(entries).toEqual([])
+    expect(() => ui!.register({ descriptor: {
+      id: 'late', surface: { apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'SettingsSection' }, content: { label: 'Late' },
+    }, localModule: { component: () => null } })).toThrow(/closed/)
+    await browser.fiber.dispose()
     for (const dispose of [...disposers].reverse()) await dispose()
     expect(adapter.browserFacets()).toEqual([])
   })
@@ -1351,6 +1397,268 @@ export default {
     expect(KNOWN_SESSION_EVENT_TYPES.has(type)).toBe(true)
     await dispose()
     expect(KNOWN_SESSION_EVENT_TYPES.has(type)).toBe(true)
+  })
+
+  it('validates exact UI provider versions and defaults to V1 only', async () => {
+    const { adapter } = await fixture()
+    const surface = { apiVersion: 'example.ui/v1', kind: 'Settings' }
+    const provider: UiContributionProvider = {
+      participantId: 'ui/default',
+      support: { surfaces: [{ ...surface, modes: ['host-rendered'] }] },
+      register() { return () => undefined },
+    }
+    for (const apiVersions of [[], ['ui.dsh/unknown'], ['ui.dsh/v1alpha2', 'ui.dsh/v1alpha2']]) {
+      expect(() => adapter.registerUiContributionProvider(provider, {
+        apiVersions: apiVersions as ContributionHostApiVersion[],
+      })).toThrow(/apiVersions/)
+    }
+    const unregister = adapter.registerUiContributionProvider(provider)
+    const activate = vi.fn()
+    await expect(adapter.mount({
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+        metadata: { name: 'example.v2-only', version: '1.0.0' },
+        spec: { facets: [{
+          name: 'ui',
+          activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'ui' } },
+          protocols: { requires: [contributionHostRequirementV2({ surfaces: [{ ...surface, mode: 'host-rendered' }] })] },
+        }] },
+      }), facet: 'ui', activate,
+    })).rejects.toThrow()
+    expect(activate).not.toHaveBeenCalled()
+    await unregister()
+  })
+
+  it.each([['ui.dsh/v1alpha2'], ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2']] as const)(
+    'isolates exact UI grants and provider cleanup for %j', async (...apiVersions) => {
+      const { adapter } = await fixture()
+      const surface = { apiVersion: 'example.ui/v1', kind: 'Settings' }
+      const extra = { apiVersion: 'example.ui/v1', kind: 'Panel' }
+      const missing = { apiVersion: 'example.ui/v1', kind: 'Missing' }
+      const disposed: string[] = []
+      const unregister = adapter.registerUiContributionProvider({
+        participantId: 'ui/versioned',
+        support: { surfaces: [surface, extra].map(row => ({ ...row, modes: ['host-rendered'] })) },
+        register(_owner, contribution, context) {
+          return () => { expect(context.signal.aborted).toBe(true); disposed.push(contribution.descriptor.id) }
+        },
+      }, { apiVersions })
+      let v1: ContributionHostClient | undefined
+      let v2: ContributionHostClient | undefined
+      const dispose = await adapter.mount({
+        manifest: defineComponentManifest({
+          apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+          metadata: { name: 'example.versioned-ui', version: '1.0.0' },
+          spec: { facets: [{
+            name: 'ui',
+            activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'ui' } },
+            protocols: { requires: [
+              ...(apiVersions.some(version => version === 'ui.dsh/v1alpha1') ? [contributionHostRequirement({ surfaces: [{ ...surface, mode: 'host-rendered' }] })] : []),
+              contributionHostRequirementV2({
+                surfaces: [{ ...surface, mode: 'host-rendered' }],
+                optionalSurfaces: [extra, missing].map(row => ({ ...row, mode: 'host-rendered' })),
+              }),
+            ] },
+          }] },
+        }), facet: 'ui',
+        activate(activation) {
+          // Request V2 first: V1 must not reuse its larger facade.
+          v2 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })
+          v1 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })
+          expect(v2!.surfaces.map(row => row.kind)).toEqual(['Settings', 'Panel'])
+          expect(() => v2!.register({ descriptor: { id: 'missing', surface: missing, content: {} } })).toThrow(/not negotiated/)
+          v2!.register({ descriptor: { id: 'same', surface, content: {} } })
+          v2!.register({ descriptor: { id: 'extra', surface: extra, content: {} } })
+          if (v1 !== undefined) {
+            expect(v1).not.toBe(v2)
+            expect(v1.surfaces.map(row => row.kind)).toEqual(['Settings'])
+            expect(() => v1!.register({ descriptor: { id: 'extra-v1', surface: extra, content: {} } })).toThrow(/not negotiated/)
+            expect(() => v1!.register({ descriptor: { id: 'same', surface, content: {} } })).toThrow(/duplicate/)
+            v1.register({ descriptor: { id: 'v1', surface, content: {} } })
+          }
+        },
+      })
+      await unregister()
+      expect(disposed.sort()).toEqual(v1 === undefined ? ['extra', 'same'] : ['extra', 'same', 'v1'])
+      expect(() => v2!.register({ descriptor: { id: 'late', surface, content: {} } })).toThrow(/closed/)
+      if (v1 !== undefined) expect(() => v1!.register({ descriptor: { id: 'late', surface, content: {} } })).toThrow(/closed/)
+      await dispose()
+      await unregister()
+      expect(disposed).toHaveLength(v1 === undefined ? 2 : 3)
+    },
+  )
+
+  it.each(['v1-only', 'both'])('does not revive old agreements after same-object provider re-registration (%s)', async mode => {
+    const { adapter } = await fixture()
+    const surface = { apiVersion: 'example.ui/v1', kind: 'Settings' }
+    const extra = { apiVersion: 'example.ui/v1', kind: 'Panel' }
+    const registered: string[] = []
+    const provider: UiContributionProvider = {
+      participantId: 'ui/reused-object',
+      support: { surfaces: [surface, extra].map(row => ({ ...row, modes: ['host-rendered'] })) },
+      register(_owner, contribution) {
+        const id = contribution.descriptor.id
+        registered.push(id)
+        return () => { registered.splice(registered.indexOf(id), 1) }
+      },
+    }
+    const versions = ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] as const
+    const requirements = [
+      contributionHostRequirement({ surfaces: [{ ...surface, mode: 'host-rendered' }] }),
+      contributionHostRequirementV2({
+        surfaces: [{ ...surface, mode: 'host-rendered' }],
+        optionalSurfaces: [{ ...extra, mode: 'host-rendered' }],
+      }),
+    ]
+    const manifest = (name: string, requires = requirements) => defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name, version: '1.0.0' },
+      spec: { facets: [{
+        name: 'ui',
+        activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'ui' } },
+        protocols: { requires },
+      }] },
+    })
+    const unregisterOld = adapter.registerUiContributionProvider(provider, { apiVersions: versions })
+    let oldV1: ContributionHostClient | undefined
+    let lateV2: () => ContributionHostClient | undefined = () => undefined
+    const disposeOld = await adapter.mount({
+      manifest: manifest('example.old-provider-agreement'), facet: 'ui',
+      activate(activation) {
+        oldV1 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })
+        oldV1!.register({ descriptor: { id: 'old', surface, content: {} } })
+        lateV2 = () => activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })
+      },
+    })
+    await unregisterOld()
+    expect(registered).toEqual([])
+    const unregisterNew = mode === 'v1-only' ? adapter.registerUiContributionProvider(provider)
+      : adapter.registerUiContributionProvider(provider, { apiVersions: versions })
+    try {
+      expect(lateV2).toThrow(/unavailable/)
+      expect(() => oldV1!.register({ descriptor: { id: 'stale', surface, content: {} } })).toThrow(/closed/)
+      await disposeOld()
+      await unregisterOld()
+      const disposeNew = await adapter.mount({
+        manifest: manifest('example.new-provider-agreement', mode === 'v1-only' ? [requirements[0]!] : requirements), facet: 'ui',
+        activate(activation) {
+          activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })!
+            .register({ descriptor: { id: 'new', surface, content: {} } })
+          const v2 = activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })
+          if (mode === 'v1-only') expect(v2).toBeUndefined()
+          else v2!.register({ descriptor: { id: 'new-extra', surface: extra, content: {} } })
+        },
+      })
+      expect(registered.sort()).toEqual(mode === 'v1-only' ? ['new'] : ['new', 'new-extra'])
+      await disposeNew()
+      expect(registered).toEqual([])
+    } finally {
+      await disposeOld()
+      await unregisterNew()
+    }
+  })
+
+  it('revokes both Host clients immediately while provider cleanup is pending', async () => {
+    const { adapter } = await fixture()
+    const surface = { apiVersion: 'example.ui/v1', kind: 'Settings' }
+    let releaseSlow: () => void = () => undefined
+    const slow = new Promise<void>(resolve => { releaseSlow = resolve })
+    const disposed: string[] = []
+    const unregister = adapter.registerUiContributionProvider({
+      participantId: 'ui/pending',
+      support: { surfaces: [{ ...surface, modes: ['host-rendered'] }] },
+      register(_owner, contribution, context) {
+        return async () => {
+          expect(context.signal.aborted).toBe(true)
+          disposed.push(contribution.descriptor.id)
+          if (contribution.descriptor.id === 'slow-v1') await slow
+        }
+      },
+    }, { apiVersions: ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] })
+    let v1: ContributionHostClient | undefined
+    let v2: ContributionHostClient | undefined
+    const dispose = await adapter.mount({
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+        metadata: { name: 'example.ui-pending', version: '1.0.0' },
+        spec: { facets: [{
+          name: 'ui',
+          activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'ui' } },
+          protocols: { requires: [
+            contributionHostRequirement({ surfaces: [{ ...surface, mode: 'host-rendered' }] }),
+            contributionHostRequirementV2({ surfaces: [{ ...surface, mode: 'host-rendered' }] }),
+          ] },
+        }] },
+      }), facet: 'ui',
+      activate(activation) {
+        v1 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })
+        v2 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })
+        v1!.register({ descriptor: { id: 'slow-v1', surface, content: {} } })
+        v2!.register({ descriptor: { id: 'fast-v2', surface, content: {} } })
+      },
+    })
+    const closing = unregister()
+    try {
+      expect(disposed.sort()).toEqual(['fast-v2', 'slow-v1'])
+      for (const client of [v1!, v2!]) {
+        expect(() => client.register({ descriptor: { id: 'late', surface, content: {} } })).toThrow(/closed/)
+      }
+    } finally {
+      releaseSlow()
+      await closing
+      await dispose()
+    }
+    expect(disposed).toHaveLength(2)
+  })
+
+  it.each(['provider', 'facet', 'activation'])('drains Host version clients after a failing disposer (%s)', async mode => {
+    const { adapter } = await fixture()
+    const settings = { apiVersion: 'example.ui/v1', kind: 'Settings' }
+    const panel = { apiVersion: 'example.ui/v1', kind: 'Panel' }
+    let v1: ContributionHostClient | undefined
+    const disposed: string[] = []
+    const unregister = adapter.registerUiContributionProvider({
+      participantId: 'ui/cleanup',
+      support: { surfaces: [settings, panel].map(surface => ({ ...surface, modes: ['host-rendered'] })) },
+      register(_owner, contribution) {
+        return () => {
+          disposed.push(contribution.descriptor.id)
+          expect(() => v1!.register({ descriptor: { id: 'late', surface: settings, content: {} } })).toThrow(/closed/)
+          if (contribution.descriptor.id === 'panel') throw new Error('provider cleanup failed')
+        }
+      },
+    }, { apiVersions: ['ui.dsh/v1alpha1', 'ui.dsh/v1alpha2'] })
+    const mounting = adapter.mount({
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+        metadata: { name: 'example.ui-cleanup', version: '1.0.0' },
+        spec: { facets: [{
+          name: 'ui',
+          activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'ui' } },
+          protocols: { requires: [
+            contributionHostRequirement({ surfaces: [{ ...settings, mode: 'host-rendered' }] }),
+            contributionHostRequirementV2({ surfaces: [{ ...panel, mode: 'host-rendered' }] }),
+          ] },
+        }] },
+      }), facet: 'ui',
+      activate(activation) {
+        v1 = activation.protocols.client({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })
+        v1!.register({ descriptor: { id: 'settings', surface: settings, content: {} } })
+        activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha2', kind: 'ContributionHost' })!
+          .register({ descriptor: { id: 'panel', surface: panel, content: {} } })
+        if (mode === 'activation') throw new Error('activation failed')
+      },
+    })
+    if (mode === 'activation') await expect(mounting).rejects.toThrow()
+    else {
+      const dispose = await mounting
+      if (mode === 'provider') {
+        await expect(unregister()).rejects.toThrow(/failed to close/)
+        await dispose()
+      } else await expect(dispose()).rejects.toThrow()
+    }
+    expect(disposed.sort()).toEqual(['panel', 'settings'])
+    await unregister()
   })
 
   it('maps a negotiated local UI host into an activation-scoped client and retracts its contributions', async () => {
