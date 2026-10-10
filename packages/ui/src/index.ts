@@ -1,13 +1,5 @@
-import {
-  validateApiReference,
-  type ApiReference,
-  type ProtocolCatalog,
-  type ProtocolDefinition,
-  type ProtocolIssue,
-  type ProtocolNegotiationInput,
-  type ProtocolRequirement,
-  type ProtocolSupport,
-} from '@dsh-std/core'
+import { type ApiReference, type ProtocolCatalog, type ProtocolDefinition, type ProtocolIssue, type ProtocolNegotiationInput, type ProtocolRequirement, type ProtocolSupport } from '@dsh-std/core'
+import { validateApiReference } from '@dsh-std/core/identity'
 import type { ManifestDefinitionCatalog, ManifestExtension } from '@dsh-std/manifest'
 
 export const API_VERSION = 'ui.dsh/v1alpha1'

@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/connection` are recorded here.
 
+## Unreleased
+
+- Updated core utility imports to the grouped public entry points.
+
 ## 0.1.1-rc.3
 
 - Added `CapabilityFailure` so definition-owned business codes and lossless JSON details survive capability dispatch, while undeclared implementation exceptions retain the existing `handler-failed` containment behavior.

@@ -159,7 +159,7 @@ interface ParticipantImplementationEndpoint {
 }
 
 interface ParticipantLease {
-  readonly participant: ParticipantIdentity
+  readonly participant: { readonly id: string }
   readonly revision: number
   readonly signal: AbortSignal
 

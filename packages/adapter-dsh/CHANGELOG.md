@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated core utility imports to the grouped public entry points.
+
 - Adapted lifecycle activation identities to carry a required generation while projecting UI contribution owners through the existing UI owner schema.
 
 ## 0.1.1-rc.4

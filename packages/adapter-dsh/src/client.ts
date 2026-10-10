@@ -5,13 +5,8 @@ import { createElement as h, useEffect, useState, type ReactNode } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import {
-  ProtocolCatalog,
-  defineProtocolDeclaration,
-  sameProtocol,
-  type ApiReference,
-  type NegotiatedProtocol,
-} from '@dsh-std/core'
+import { ProtocolCatalog, defineProtocolDeclaration, type ApiReference, type NegotiatedProtocol } from '@dsh-std/core'
+import { sameProtocol } from '@dsh-std/core/identity'
 import {
   defineComponentManifest,
   findFacet,

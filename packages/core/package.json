@@ -11,6 +11,18 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./identity": {
+      "types": "./lib/identity.d.ts",
+      "default": "./lib/identity.js"
+    },
+    "./json": {
+      "types": "./lib/json.d.ts",
+      "default": "./lib/json.js"
+    },
+    "./version": {
+      "types": "./lib/version.d.ts",
+      "default": "./lib/version.js"
     }
   },
   "files": ["lib", "CHANGELOG.md"],

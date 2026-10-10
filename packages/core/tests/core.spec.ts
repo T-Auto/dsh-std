@@ -2,12 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   ProtocolCatalog,
   defineProtocolDeclaration,
-  freezeProtocolJsonValue,
-  parseApiVersion,
-  protocolFamilyKey,
-  validateApiReference,
-  validateProtocolJsonValue,
 } from '../src/index.js'
+import { validateApiReference } from '../src/identity.js'
+import { freezeProtocolJsonValue, validateProtocolJsonValue } from '../src/json.js'
 
 function catalog() {
   const value = new ProtocolCatalog({ name: 'test-evaluator', version: '1.0.0' })
@@ -60,8 +57,8 @@ describe('@dsh-std/core', () => {
     const protocols = catalog()
     expect(protocols.understands({ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' })).toBe(true)
     expect(protocols.understands({ apiVersion: 'widgets.example/v1alpha2', kind: 'Widget' })).toBe(false)
-    expect(protocolFamilyKey({ apiVersion: 'widgets.example/v1alpha2', kind: 'Widget' })).toBe(
-      protocolFamilyKey({ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }),
+    expect(protocols.resolve({ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' })).toBe(
+      protocols.resolve({ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }),
     )
   })
 
@@ -214,7 +211,7 @@ describe('@dsh-std/core', () => {
 
   it('does not confuse installing a definition with a live implementation', () => {
     const protocols = catalog()
-    expect(protocols.list()).toHaveLength(1)
+    expect(protocols.resolve({ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' })).toBeDefined()
     expect(protocols.negotiate([])).toMatchObject({ compatible: true, protocols: [], issues: [] })
   })
 
@@ -224,9 +221,10 @@ describe('@dsh-std/core', () => {
   })
 
   it('validates API versions independently from semantic package versions', () => {
-    expect(parseApiVersion('connection.dsh/v2beta3')).toEqual({
-      group: 'connection.dsh', major: 2, stability: 'beta', revision: 3,
-    })
+    expect(() => validateApiReference({ apiVersion: 'connection.dsh/v2beta3', kind: 'Connection' })).not.toThrow()
+    for (const apiVersion of ['2.3.0', 'connection.dsh/v0', 'connection.dsh/v2beta0']) {
+      expect(() => validateApiReference({ apiVersion, kind: 'Connection' })).toThrow(/invalid apiVersion/)
+    }
   })
 
   it('requires kind to be an ASCII identifier beginning with an uppercase letter', () => {
